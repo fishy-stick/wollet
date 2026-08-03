@@ -1,0 +1,10 @@
+.git
+.gitignore
+.agents
+.codex
+.env
+.idea
+data
+coverage.out
+wakelet
+wakelet-sim

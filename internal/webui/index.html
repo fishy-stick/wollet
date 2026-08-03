@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#ffffff">
+  <title>Wakelet</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <div id="boot-view" class="boot-view" aria-label="正在载入">
+    <div class="brand brand--boot" aria-hidden="true">
+      <svg class="brand__mark" viewBox="0 0 96 96" role="img">
+        <path d="M18 31a42 42 0 0 1 60 0M28 42a28 28 0 0 1 40 0M38 52a14 14 0 0 1 20 0" />
+        <path d="M48 44v25M34 57a20 20 0 1 0 28 0" />
+      </svg>
+      <span class="brand__name">Wakelet</span>
+    </div>
+  </div>
+
+  <main id="login-view" class="login-view" hidden>
+    <div class="brand brand--login" aria-label="Wakelet">
+      <svg class="brand__mark" viewBox="0 0 96 96" aria-hidden="true">
+        <path d="M18 31a42 42 0 0 1 60 0M28 42a28 28 0 0 1 40 0M38 52a14 14 0 0 1 20 0" />
+        <path d="M48 44v25M34 57a20 20 0 1 0 28 0" />
+      </svg>
+      <span class="brand__name">Wakelet</span>
+    </div>
+    <form id="login-form" class="login-form" novalidate>
+      <h1>管理员登录</h1>
+      <label for="username">用户名</label>
+      <input id="username" name="username" type="text" autocomplete="username" maxlength="128" required>
+      <label for="password">密码</label>
+      <div class="password-field">
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+        <button id="toggle-password" class="icon-button password-field__toggle" type="button" aria-label="显示密码" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.8"/></svg>
+        </button>
+      </div>
+      <p id="login-error" class="form-error" role="alert" hidden></p>
+      <button id="login-button" class="button button--primary login-form__submit" type="submit">登录</button>
+    </form>
+  </main>
+
+  <main id="app-view" class="app-view" hidden>
+    <nav class="utilities" aria-label="管理操作">
+      <button id="create-token" class="text-button" type="button">生成 Token</button>
+      <button id="logout" class="text-button" type="button">退出</button>
+    </nav>
+
+    <header class="app-brand">
+      <div class="brand" aria-label="Wakelet">
+        <svg class="brand__mark" viewBox="0 0 96 96" aria-hidden="true">
+          <path d="M18 31a42 42 0 0 1 60 0M28 42a28 28 0 0 1 40 0M38 52a14 14 0 0 1 20 0" />
+          <path d="M48 44v25M34 57a20 20 0 1 0 28 0" />
+        </svg>
+        <span class="brand__name">Wakelet</span>
+      </div>
+    </header>
+
+    <section id="device-focus" class="device-focus" aria-live="polite">
+      <h1 id="device-name" class="device-focus__name"></h1>
+      <p id="device-status" class="device-focus__status"></p>
+      <p id="device-meta" class="device-focus__meta"></p>
+      <button id="device-action" class="device-action" type="button">
+        <svg class="device-action__icon" viewBox="0 0 96 96" aria-hidden="true">
+          <path d="M48 14v36M28 31a32 32 0 1 0 40 0" />
+        </svg>
+        <span id="device-action-label"></span>
+      </button>
+    </section>
+
+    <section id="empty-state" class="empty-state" hidden>
+      <h1>还没有设备</h1>
+      <p>生成 Token，在 Windows 客户端中完成绑定</p>
+      <button id="empty-create-token" class="button button--primary" type="button">生成 Token</button>
+    </section>
+
+    <footer class="device-footer">
+      <div id="device-rail" class="device-rail" role="tablist" aria-label="选择设备"></div>
+    </footer>
+
+    <button id="remove-device" class="remove-device" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>
+      <span>移除当前设备</span>
+    </button>
+  </main>
+
+  <dialog id="token-dialog" class="dialog dialog--token" aria-labelledby="token-title">
+    <form method="dialog" class="dialog__surface">
+      <h2 id="token-title">绑定新设备</h2>
+      <p class="dialog__description">在 Windows 客户端中输入以下 Token</p>
+      <output id="token-value" class="token-value" aria-label="绑定 Token"></output>
+      <button id="copy-token" class="button button--outline" type="button">复制</button>
+      <p id="token-countdown" class="token-countdown"></p>
+      <p class="dialog__note">Token 仅显示一次</p>
+      <button class="text-button dialog__close" value="close">关闭</button>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-dialog" class="dialog" aria-labelledby="confirm-title">
+    <div class="dialog__surface dialog__surface--confirm">
+      <h2 id="confirm-title"></h2>
+      <p id="confirm-message" class="dialog__description"></p>
+      <div class="dialog__actions">
+        <button id="confirm-cancel" class="button button--quiet" type="button">取消</button>
+        <button id="confirm-submit" class="button button--danger" type="button"></button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

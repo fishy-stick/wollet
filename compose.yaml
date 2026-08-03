@@ -1,0 +1,19 @@
+services:
+  wakelet:
+    build:
+      context: .
+    network_mode: host
+    user: "${WAKELET_UID:-1000}:${WAKELET_GID:-1000}"
+    env_file:
+      - .env
+    environment:
+      WAKELET_DB_PATH: /data/wakelet.db
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 15s
