@@ -1,6 +1,6 @@
 # Wollet
 
-Wollet 是一个纯内网使用的 Windows 远程开关机工具。本仓库当前实现 Linux 服务端、内嵌管理页面和用于联调的模拟客户端。
+Wollet 是一个纯内网使用的 Windows 远程开关机工具。本仓库包含 Linux 服务端、内嵌管理页面、Windows 客户端和用于联调的模拟客户端。
 
 名字 **Wollet** 由 **WOL**（Wake-on-LAN）和后缀 **-let** 组合而来，表达“小巧、专注的 Wake-on-LAN 工具”。
 
@@ -79,6 +79,10 @@ go build ./cmd/wollet-sim
 ```
 
 模拟器确认关机指令后默认退出，使设备状态变为离线；它不会关闭当前操作系统。
+
+## Windows 客户端开发
+
+Windows 客户端位于 [`clients/windows`](clients/windows/README.md)，使用 C#、.NET 10 和 WinForms。当前环境可以构建核心逻辑并交叉发布 Windows x64 单文件，Service、DPAPI、UAC 和真实关机仍需在 Windows 10/11 上验证。
 
 ## 配置
 

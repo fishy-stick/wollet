@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Wollet.Client.Core/Wollet.Client.Core.csproj" />
+  <Project Path="Wollet.Client.Core.Tests/Wollet.Client.Core.Tests.csproj" />
+  <Project Path="Wollet.Client/Wollet.Client.csproj" />
+</Solution>

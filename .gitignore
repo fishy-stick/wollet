@@ -4,3 +4,6 @@ data/
 /wollet
 /wollet-sim
 coverage.out
+**/bin/
+**/obj/
+*.user
