@@ -1,13 +1,13 @@
 services:
-  wakelet:
+  wollet:
     build:
       context: .
     network_mode: host
-    user: "${WAKELET_UID:-1000}:${WAKELET_GID:-1000}"
+    user: "${WOLLET_UID:-1000}:${WOLLET_GID:-1000}"
     env_file:
       - .env
     environment:
-      WAKELET_DB_PATH: /data/wakelet.db
+      WOLLET_DB_PATH: /data/wollet.db
     volumes:
       - ./data:/data
     restart: unless-stopped

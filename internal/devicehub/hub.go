@@ -9,7 +9,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
-	"github.com/fishy-stick/wakelet/internal/protocol"
+	"github.com/fishy-stick/wollet/internal/protocol"
 )
 
 var (

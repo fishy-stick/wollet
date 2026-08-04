@@ -1,4 +1,4 @@
-module github.com/fishy-stick/wakelet
+module github.com/fishy-stick/wollet
 
 go 1.26.0
 

@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fishy-stick/wakelet/internal/identity"
+	"github.com/fishy-stick/wollet/internal/identity"
 )
 
 type SessionManager struct {

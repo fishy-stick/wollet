@@ -9,11 +9,11 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
-	"github.com/fishy-stick/wakelet/internal/events"
-	"github.com/fishy-stick/wakelet/internal/identity"
-	"github.com/fishy-stick/wakelet/internal/protocol"
-	"github.com/fishy-stick/wakelet/internal/store"
-	"github.com/fishy-stick/wakelet/internal/validation"
+	"github.com/fishy-stick/wollet/internal/events"
+	"github.com/fishy-stick/wollet/internal/identity"
+	"github.com/fishy-stick/wollet/internal/protocol"
+	"github.com/fishy-stick/wollet/internal/store"
+	"github.com/fishy-stick/wollet/internal/validation"
 )
 
 type bindRequest struct {
@@ -163,7 +163,7 @@ func (s *Server) handleClientConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) authenticateClient(w http.ResponseWriter, r *http.Request) (store.Device, bool) {
-	deviceID := strings.TrimSpace(r.Header.Get("X-Wakelet-Device-ID"))
+	deviceID := strings.TrimSpace(r.Header.Get("X-Wollet-Device-ID"))
 	authorization := strings.TrimSpace(r.Header.Get("Authorization"))
 	if deviceID == "" || !strings.HasPrefix(authorization, "Bearer ") {
 		writeError(w, http.StatusUnauthorized, "invalid_device_credentials", "设备凭据无效")

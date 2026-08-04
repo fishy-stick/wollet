@@ -18,9 +18,9 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
-	"github.com/fishy-stick/wakelet/internal/config"
-	"github.com/fishy-stick/wakelet/internal/protocol"
-	"github.com/fishy-stick/wakelet/internal/store"
+	"github.com/fishy-stick/wollet/internal/config"
+	"github.com/fishy-stick/wollet/internal/protocol"
+	"github.com/fishy-stick/wollet/internal/store"
 )
 
 type fakeWOLSender struct {
@@ -29,7 +29,7 @@ type fakeWOLSender struct {
 }
 
 func TestEmbeddedWebUI(t *testing.T) {
-	dataStore, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "wakelet.db"))
+	dataStore, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "wollet.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func (s *fakeWOLSender) Send(_ context.Context, mac net.HardwareAddr) error {
 }
 
 func TestEndToEndDeviceLifecycle(t *testing.T) {
-	dataStore, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "wakelet.db"))
+	dataStore, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "wollet.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestEndToEndDeviceLifecycle(t *testing.T) {
 	deviceID, secret := bindForTest(t, testServer.URL, token)
 
 	wsURL := "ws" + strings.TrimPrefix(testServer.URL, "http") + "/api/v1/client/connect"
-	headers := http.Header{"X-Wakelet-Device-ID": {deviceID}, "Authorization": {"Bearer " + secret}}
+	headers := http.Header{"X-Wollet-Device-ID": {deviceID}, "Authorization": {"Bearer " + secret}}
 	conn, response, err := websocket.Dial(context.Background(), wsURL, &websocket.DialOptions{HTTPHeader: headers})
 	if err != nil {
 		if response != nil {
@@ -145,7 +145,7 @@ func TestEndToEndDeviceLifecycle(t *testing.T) {
 	waitFor(t, time.Second, func() bool { return !app.hub.IsOnline(deviceID) })
 
 	request, _ := http.NewRequest(http.MethodGet, testServer.URL+"/api/v1/client/me", nil)
-	request.Header.Set("X-Wakelet-Device-ID", deviceID)
+	request.Header.Set("X-Wollet-Device-ID", deviceID)
 	request.Header.Set("Authorization", "Bearer "+secret)
 	invalidResponse, err := http.DefaultClient.Do(request)
 	if err != nil {
@@ -158,7 +158,7 @@ func TestEndToEndDeviceLifecycle(t *testing.T) {
 }
 
 func TestLoginRejectsMissingOrigin(t *testing.T) {
-	dataStore, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "wakelet.db"))
+	dataStore, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "wollet.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

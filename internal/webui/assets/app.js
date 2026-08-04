@@ -457,7 +457,7 @@ async function api(path, options = {}) {
 
 function readSelectedDevice() {
   try {
-    return window.localStorage.getItem("wakelet.selectedDeviceId");
+    return window.localStorage.getItem("wollet.selectedDeviceId");
   } catch {
     return null;
   }
@@ -465,8 +465,8 @@ function readSelectedDevice() {
 
 function writeSelectedDevice(value) {
   try {
-    if (value) window.localStorage.setItem("wakelet.selectedDeviceId", value);
-    else window.localStorage.removeItem("wakelet.selectedDeviceId");
+    if (value) window.localStorage.setItem("wollet.selectedDeviceId", value);
+    else window.localStorage.removeItem("wollet.selectedDeviceId");
   } catch {
     // Selection persistence is optional; the app remains fully functional.
   }

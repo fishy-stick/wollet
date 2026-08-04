@@ -19,7 +19,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
-	"github.com/fishy-stick/wakelet/internal/protocol"
+	"github.com/fishy-stick/wollet/internal/protocol"
 )
 
 var errShutdownReceived = errors.New("shutdown command received")
@@ -41,7 +41,7 @@ type apiError struct {
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "wakelet-sim:", err)
+		fmt.Fprintln(os.Stderr, "wollet-sim:", err)
 		os.Exit(1)
 	}
 }
@@ -62,11 +62,11 @@ func run(args []string) error {
 
 func bind(args []string) error {
 	flags := flag.NewFlagSet("bind", flag.ContinueOnError)
-	serverURL := flags.String("server", "", "Wakelet server URL")
+	serverURL := flags.String("server", "", "Wollet server URL")
 	token := flags.String("token", "", "one-time pairing token")
 	name := flags.String("name", "", "device name")
 	mac := flags.String("mac", "", "device MAC address")
-	configPath := flags.String("config", "wakelet-sim.json", "output config file")
+	configPath := flags.String("config", "wollet-sim.json", "output config file")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -118,7 +118,7 @@ func bind(args []string) error {
 
 func runSimulator(args []string) error {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
-	configPath := flags.String("config", "wakelet-sim.json", "simulator config file")
+	configPath := flags.String("config", "wollet-sim.json", "simulator config file")
 	exitOnShutdown := flags.Bool("exit-on-shutdown", true, "exit after acknowledging shutdown")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -173,7 +173,7 @@ func connect(ctx context.Context, config simulatorConfig, exitOnShutdown bool) e
 	}
 	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/api/v1/client/connect"
 	headers := http.Header{}
-	headers.Set("X-Wakelet-Device-ID", config.DeviceID)
+	headers.Set("X-Wollet-Device-ID", config.DeviceID)
 	headers.Set("Authorization", "Bearer "+config.DeviceSecret)
 	conn, response, err := websocket.Dial(ctx, endpoint.String(), &websocket.DialOptions{HTTPHeader: headers})
 	if err != nil {

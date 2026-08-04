@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fishy-stick/wakelet/internal/identity"
+	"github.com/fishy-stick/wollet/internal/identity"
 )
 
 func TestPairingTokenConcurrentConsumption(t *testing.T) {
 	ctx := context.Background()
-	dataStore, err := Open(ctx, filepath.Join(t.TempDir(), "wakelet.db"))
+	dataStore, err := Open(ctx, filepath.Join(t.TempDir(), "wollet.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestPairingTokenConcurrentConsumption(t *testing.T) {
 
 func TestExpiredTokenCleanup(t *testing.T) {
 	ctx := context.Background()
-	dataStore, err := Open(ctx, filepath.Join(t.TempDir(), "wakelet.db"))
+	dataStore, err := Open(ctx, filepath.Join(t.TempDir(), "wollet.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

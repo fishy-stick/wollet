@@ -1,4 +1,4 @@
-# Wakelet v1 服务端协议
+# Wollet v1 服务端协议
 
 所有 JSON 时间均为 UTC RFC 3339。REST 错误统一为：
 
@@ -23,7 +23,7 @@
   { "username": "admin", "password": "..." }
   ```
 
-  成功后设置 `wakelet_session` HttpOnly、SameSite=Strict Cookie。登录每个来源 IP 每分钟最多尝试五次。
+  成功后设置 `wollet_session` HttpOnly、SameSite=Strict Cookie。登录每个来源 IP 每分钟最多尝试五次。
 
 - `GET /api/v1/auth/session`：检查当前会话。
 - `POST /api/v1/auth/logout`：撤销当前会话，返回 `204`。
@@ -106,7 +106,7 @@ Token 由 20 个 Crockford Base32 字符组成，破折号只用于显示。固�
 `GET /api/v1/client/me` 使用：
 
 ```http
-X-Wakelet-Device-ID: <device-id>
+X-Wollet-Device-ID: <device-id>
 Authorization: Bearer <device-secret>
 ```
 

@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/fishy-stick/wakelet/internal/events"
-	"github.com/fishy-stick/wakelet/internal/identity"
-	"github.com/fishy-stick/wakelet/internal/store"
+	"github.com/fishy-stick/wollet/internal/events"
+	"github.com/fishy-stick/wollet/internal/identity"
+	"github.com/fishy-stick/wollet/internal/store"
 )
 
 type loginRequest struct {

@@ -12,15 +12,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fishy-stick/wakelet/internal/config"
-	"github.com/fishy-stick/wakelet/internal/server"
-	"github.com/fishy-stick/wakelet/internal/store"
-	"github.com/fishy-stick/wakelet/internal/wol"
+	"github.com/fishy-stick/wollet/internal/config"
+	"github.com/fishy-stick/wollet/internal/server"
+	"github.com/fishy-stick/wollet/internal/store"
+	"github.com/fishy-stick/wollet/internal/wol"
 )
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "wakelet:", err)
+		fmt.Fprintln(os.Stderr, "wollet:", err)
 		os.Exit(1)
 	}
 }
@@ -62,7 +62,7 @@ func runServer() error {
 	}
 	serveErrors := make(chan error, 1)
 	go func() {
-		logger.Warn("Wakelet is serving plain HTTP; use only on a trusted LAN or VPN", "listen_addr", cfg.ListenAddr)
+		logger.Warn("Wollet is serving plain HTTP; use only on a trusted LAN or VPN", "listen_addr", cfg.ListenAddr)
 		serveErrors <- httpServer.ListenAndServe()
 	}()
 
@@ -74,7 +74,7 @@ func runServer() error {
 	case <-ctx.Done():
 	}
 
-	logger.Info("shutting down Wakelet")
+	logger.Info("shutting down Wollet")
 	app.Close()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

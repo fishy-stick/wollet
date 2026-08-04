@@ -15,15 +15,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fishy-stick/wakelet/internal/auth"
-	"github.com/fishy-stick/wakelet/internal/config"
-	"github.com/fishy-stick/wakelet/internal/devicehub"
-	"github.com/fishy-stick/wakelet/internal/events"
-	"github.com/fishy-stick/wakelet/internal/store"
-	"github.com/fishy-stick/wakelet/internal/webui"
+	"github.com/fishy-stick/wollet/internal/auth"
+	"github.com/fishy-stick/wollet/internal/config"
+	"github.com/fishy-stick/wollet/internal/devicehub"
+	"github.com/fishy-stick/wollet/internal/events"
+	"github.com/fishy-stick/wollet/internal/store"
+	"github.com/fishy-stick/wollet/internal/webui"
 )
 
-const sessionCookieName = "wakelet_session"
+const sessionCookieName = "wollet_session"
 
 type WOLSender interface {
 	Send(context.Context, net.HardwareAddr) error

@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/fishy-stick/wakelet/internal/devicehub"
-	"github.com/fishy-stick/wakelet/internal/identity"
-	"github.com/fishy-stick/wakelet/internal/store"
+	"github.com/fishy-stick/wollet/internal/devicehub"
+	"github.com/fishy-stick/wollet/internal/identity"
+	"github.com/fishy-stick/wollet/internal/store"
 )
 
 func (s *Server) handleWakeDevice(w http.ResponseWriter, r *http.Request) {
