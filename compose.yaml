@@ -1,5 +1,6 @@
 services:
   wollet:
+    image: "${WOLLET_IMAGE:-ghcr.io/fishy-stick/wollet:latest}"
     build:
       context: .
     network_mode: host
