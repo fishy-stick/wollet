@@ -598,6 +598,14 @@ body:not([data-keyboard-navigation]) button:focus-visible {
   gap: 12px;
 }
 
+#copy-token {
+  width: 8em;
+}
+
+#copy-server {
+  width: 10em;
+}
+
 .token-countdown {
   margin: 20px 0 0;
   color: var(--muted-strong);

@@ -49,10 +49,14 @@ func TestLoadAllowsAuthenticationToBeDisabled(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsShortConfiguredPassword(t *testing.T) {
-	t.Setenv("WOLLET_ADMIN_PASSWORD", "too-short")
+func TestLoadAllowsAnyNonEmptyConfiguredPassword(t *testing.T) {
+	t.Setenv("WOLLET_ADMIN_PASSWORD", "x")
 
-	if _, err := Load(); err == nil {
-		t.Fatal("expected a short configured password to be rejected")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AdminPassword != "x" {
+		t.Fatalf("AdminPassword = %q, want x", cfg.AdminPassword)
 	}
 }

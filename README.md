@@ -23,7 +23,7 @@ Linux 服务端提供管理页面、设备状态和 Wake-on-LAN；Windows 客户
 
 Wollet 为可信局域网和 VPN 环境设计，服务端直接提供 HTTP 和 WebSocket，不包含 TLS 终止。不要将服务端端口直接暴露到公网；跨网络访问时，请使用可信 VPN 或在前方配置 HTTPS 反向代理。
 
-`WOLLET_ADMIN_PASSWORD` 留空时，管理页面不要求登录，服务端会在启动日志中给出警告。除隔离的测试网络外，建议设置一个至少 12 个字符的密码。
+`WOLLET_ADMIN_PASSWORD` 留空时，管理页面不要求登录，服务端会在启动日志中给出警告。除隔离的测试网络外，建议设置独立且不易猜测的密码。
 
 ## 快速开始
 
@@ -37,7 +37,7 @@ cd wollet
 cp .env.example .env
 mkdir -p data
 
-# 编辑 .env，至少设置 WOLLET_ADMIN_PASSWORD
+# 编辑 .env，设置 WOLLET_ADMIN_PASSWORD
 docker compose pull
 docker compose up -d
 ```
@@ -51,7 +51,7 @@ docker compose logs -f wollet
 Compose 默认使用 `ghcr.io/fishy-stick/wollet:latest`。长期运行时，建议在 `.env` 中将 `WOLLET_IMAGE` 固定到具体版本，例如：
 
 ```dotenv
-WOLLET_IMAGE=ghcr.io/fishy-stick/wollet:v1.0.1
+WOLLET_IMAGE=ghcr.io/fishy-stick/wollet:v1.0.2
 ```
 
 如果希望从当前源码构建镜像：
@@ -86,7 +86,7 @@ docker compose up -d --build
 | --- | --- | --- |
 | `WOLLET_IMAGE` | `ghcr.io/fishy-stick/wollet:latest` | Compose 使用的服务端镜像 |
 | `WOLLET_ADMIN_USERNAME` | `admin` | 管理员用户名 |
-| `WOLLET_ADMIN_PASSWORD` | 空 | 至少 12 个字符；留空时关闭登录认证 |
+| `WOLLET_ADMIN_PASSWORD` | 空 | 非空时启用登录认证；留空时关闭登录认证 |
 | `WOLLET_LISTEN_ADDR` | `0.0.0.0:8080` | HTTP 监听地址 |
 | `WOLLET_DB_PATH` | `/data/wollet.db` | SQLite 数据库路径；Compose 中固定为此值 |
 | `WOLLET_WOL_BROADCAST` | `255.255.255.255` | Wake-on-LAN IPv4 广播地址；多网卡环境可改为定向广播地址 |
@@ -184,8 +184,8 @@ dotnet test --project clients/windows/Wollet.Client.Core.Tests/Wollet.Client.Cor
 推送符合 `v*` 格式的 Git 标签会触发 [Release workflow](https://github.com/fishy-stick/wollet/actions/workflows/release.yml)：
 
 ```bash
-git tag v1.0.1
-git push origin v1.0.1
+git tag v1.0.2
+git push origin v1.0.2
 ```
 
 GitHub Actions 会发布：
