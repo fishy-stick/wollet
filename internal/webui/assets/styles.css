@@ -11,6 +11,7 @@
   --green: #06ad45;
   --red: #df0b12;
   --red-dark: #b7070d;
+  --amber: #b65f00;
   --focus: #0a58f5;
   --font-ui: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
   --font-brand: "Arial Black", "Segoe UI Black", var(--font-ui);
@@ -328,6 +329,11 @@ button {
   color: var(--muted);
 }
 
+.device-focus__status[data-status="waking"],
+.device-focus__status[data-status="shutting_down"] {
+  color: var(--amber);
+}
+
 .device-focus__meta {
   margin: 18px 0 26px;
   color: var(--muted);
@@ -365,6 +371,15 @@ button {
 .device-action[data-action="wake"]:hover:not(:disabled) {
   background: #f3f7ff;
   color: var(--blue-dark);
+}
+
+.device-action[data-operation] {
+  box-shadow: 0 0 0 10px color-mix(in srgb, var(--amber) 10%, transparent);
+  animation: operation-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes operation-pulse {
+  50% { box-shadow: 0 0 0 18px color-mix(in srgb, var(--amber) 3%, transparent); }
 }
 
 .device-action:disabled {
@@ -452,6 +467,11 @@ button {
 
 .device-tab__dot[data-status="online"] {
   background: var(--green);
+}
+
+.device-tab__dot[data-status="waking"],
+.device-tab__dot[data-status="shutting_down"] {
+  background: var(--amber);
 }
 
 .remove-device {
@@ -556,6 +576,13 @@ button {
   white-space: nowrap;
 }
 
+.token-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+
 .token-countdown {
   margin: 20px 0 0;
   color: var(--muted-strong);
@@ -576,6 +603,15 @@ button {
 .dialog__surface--confirm {
   align-items: stretch;
   padding: 38px 42px 34px;
+}
+
+.shutdown-countdown {
+  margin-top: 18px;
+  color: var(--red);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 42px;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .dialog__actions {

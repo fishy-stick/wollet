@@ -25,8 +25,15 @@
 
   成功后设置 `wollet_session` HttpOnly、SameSite=Strict Cookie。登录每个来源 IP 每分钟最多尝试五次。
 
-- `GET /api/v1/auth/session`：检查当前会话。
+- `GET /api/v1/auth/session`：检查当前会话：
+
+  ```json
+  { "username": "admin", "authenticationEnabled": true }
+  ```
+
 - `POST /api/v1/auth/logout`：撤销当前会话，返回 `204`。
+
+未设置 `WOLLET_ADMIN_PASSWORD` 时，管理员接口免认证，`authenticationEnabled` 为 `false`；同源校验仍然生效。此模式只适用于可信局域网或 VPN，服务启动时会输出警告日志。
 
 ### 绑定 Token
 
@@ -51,18 +58,21 @@ Token 由 20 个 Crockford Base32 字符组成，破折号只用于显示。固�
   "name": "工作站",
   "macAddress": "A4:83:E7:19:2C:5A",
   "status": "online",
+  "operation": "shutting_down",
   "lastSeenAt": "2026-08-04T00:00:00Z",
   "createdAt": "2026-08-03T23:50:00Z"
 }
 ```
 
+`status` 只表示实际 WebSocket 在线状态。可选的 `operation` 是服务端内存中的弱暂态：`waking` 最多保留 90 秒，`shutting_down` 最多保留 60 秒；设备上线或离线时会提前清除，服务重启后也不会恢复。暂态期间允许再次调用控制接口。
+
 - `GET /api/v1/devices` → `{ "devices": [...] }`
 - `POST /api/v1/devices/{id}/wake`
   - 仅离线设备可用。
-  - 成功写入广播 UDP 套接字后返回 `{ "status": "sent" }`。
+  - 成功写入广播 UDP 套接字后返回 `{ "status": "sent", "operation": "waking" }`。
 - `POST /api/v1/devices/{id}/shutdown`
-  - 仅在线设备可用，不接受参数。
-  - 服务端等待客户端五秒内确认，成功返回 `{ "status": "delivered", "commandId": "..." }`。
+  - 仅在线设备可用，不接受参数；Web 页面在调用接口前显示 10 秒倒计时，可取消或立即调用。
+  - 服务端等待客户端五秒内确认，成功返回 `{ "status": "delivered", "commandId": "...", "operation": "shutting_down" }`。
   - 不保存、不排队，同设备同一时间只允许一个关机请求。
 - `DELETE /api/v1/devices/{id}`
   - 删除凭据并立即断开当前连接，返回 `204`。
@@ -73,6 +83,8 @@ Token 由 20 个 Crockford Base32 字符组成，破折号只用于显示。固�
 
 - `snapshot`：连接及每次重连后的完整 `{ "devices": [...] }`。
 - `device.updated`：完整设备对象。
+- `device.wake_timeout`：90 秒内未检测到上线，设备对象中的弱暂态已清除。
+- `device.shutdown_timeout`：60 秒内未检测到离线，设备对象中的弱暂态已清除。
 - `device.removed`：`{ "id": "..." }`。
 - 每 20 秒发送 SSE 注释作为 keepalive。
 

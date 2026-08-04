@@ -33,3 +33,26 @@ func TestLoadUsesConfiguredWOLBroadcast(t *testing.T) {
 		t.Fatalf("WOLBroadcast = %v, want %v", cfg.WOLBroadcast, want)
 	}
 }
+func TestLoadAllowsAuthenticationToBeDisabled(t *testing.T) {
+	t.Setenv("WOLLET_ADMIN_USERNAME", "")
+	t.Setenv("WOLLET_ADMIN_PASSWORD", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AdminUsername != "admin" {
+		t.Fatalf("AdminUsername = %q, want admin", cfg.AdminUsername)
+	}
+	if cfg.AdminPassword != "" {
+		t.Fatal("AdminPassword should remain empty when authentication is disabled")
+	}
+}
+
+func TestLoadRejectsShortConfiguredPassword(t *testing.T) {
+	t.Setenv("WOLLET_ADMIN_PASSWORD", "too-short")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected a short configured password to be rejected")
+	}
+}

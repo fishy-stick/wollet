@@ -20,6 +20,10 @@ type loginRequest struct {
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if !s.authEnabled {
+		writeError(w, http.StatusConflict, "authentication_disabled", "管理员认证未启用")
+		return
+	}
 	key := remoteIP(r)
 	if !s.loginLimiter.Allow(key, time.Now().UTC()) {
 		writeError(w, http.StatusTooManyRequests, "too_many_attempts", "登录尝试过于频繁，请稍后再试")
@@ -55,7 +59,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 		Secure:   false,
 	})
-	writeJSON(w, http.StatusOK, map[string]string{"username": s.cfg.AdminUsername})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"username": s.cfg.AdminUsername, "authenticationEnabled": true,
+	})
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +80,9 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSession(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"username": s.cfg.AdminUsername})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"username": s.cfg.AdminUsername, "authenticationEnabled": s.authEnabled,
+	})
 }
 
 func (s *Server) handleCreatePairingToken(w http.ResponseWriter, r *http.Request) {
@@ -99,6 +107,7 @@ type deviceView struct {
 	Name       string     `json:"name"`
 	MACAddress string     `json:"macAddress"`
 	Status     string     `json:"status"`
+	Operation  string     `json:"operation,omitempty"`
 	LastSeenAt *time.Time `json:"lastSeenAt"`
 	CreatedAt  time.Time  `json:"createdAt"`
 }
@@ -110,7 +119,8 @@ func (s *Server) view(device store.Device) deviceView {
 	}
 	return deviceView{
 		ID: device.ID, Name: device.Name, MACAddress: device.MACAddress,
-		Status: status, LastSeenAt: device.LastSeenAt, CreatedAt: device.CreatedAt,
+		Status: status, Operation: s.operations.get(device.ID),
+		LastSeenAt: device.LastSeenAt, CreatedAt: device.CreatedAt,
 	}
 }
 

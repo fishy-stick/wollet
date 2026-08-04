@@ -136,6 +136,35 @@ func TestEndToEndDeviceLifecycle(t *testing.T) {
 	if shutdownResponse.StatusCode != http.StatusOK {
 		t.Fatalf("shutdown returned HTTP %d: %s", shutdownResponse.StatusCode, readBody(shutdownResponse))
 	}
+	if got := app.operations.get(deviceID); got != deviceOperationShuttingDown {
+		t.Fatalf("operation = %q after shutdown, want %q", got, deviceOperationShuttingDown)
+	}
+
+	repeatedShutdownDone := make(chan *http.Response, 1)
+	go func() {
+		repeatedShutdownDone <- adminRequestForTest(t, testServer.URL, cookie, http.MethodPost, "/api/v1/devices/"+deviceID+"/shutdown", nil)
+	}()
+	command = protocol.ServerMessage{}
+	if err := wsjson.Read(context.Background(), conn, &command); err != nil {
+		t.Fatal(err)
+	}
+	if command.Type != "shutdown" || command.CommandID == "" {
+		t.Fatalf("unexpected repeated command %#v", command)
+	}
+	if err := wsjson.Write(context.Background(), conn, protocol.ClientMessage{Type: "shutdown_ack", CommandID: command.CommandID}); err != nil {
+		t.Fatal(err)
+	}
+	repeatedShutdownResponse := <-repeatedShutdownDone
+	defer repeatedShutdownResponse.Body.Close()
+	if repeatedShutdownResponse.StatusCode != http.StatusOK {
+		t.Fatalf("repeated shutdown returned HTTP %d: %s", repeatedShutdownResponse.StatusCode, readBody(repeatedShutdownResponse))
+	}
+
+	if err := conn.Close(websocket.StatusNormalClosure, "test complete"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, time.Second, func() bool { return !app.hub.IsOnline(deviceID) })
+	waitFor(t, time.Second, func() bool { return app.operations.get(deviceID) == "" })
 
 	deleteResponse := adminRequestForTest(t, testServer.URL, cookie, http.MethodDelete, "/api/v1/devices/"+deviceID, nil)
 	defer deleteResponse.Body.Close()
@@ -269,4 +298,84 @@ func waitFor(t *testing.T, timeout time.Duration, condition func() bool) {
 func readBody(response *http.Response) string {
 	contents, _ := io.ReadAll(response.Body)
 	return string(contents)
+}
+func TestAuthenticationCanBeDisabled(t *testing.T) {
+	dataStore, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "wollet.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	cfg := config.Config{AdminUsername: "admin", SessionTTL: time.Hour, OfflineAfter: time.Minute, TokenTTL: 5 * time.Minute}
+	app := New(cfg, dataStore, &fakeWOLSender{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer app.Close()
+	testServer := httptest.NewServer(app)
+	defer testServer.Close()
+
+	response, err := http.Get(testServer.URL + "/api/v1/auth/session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var session struct {
+		AuthenticationEnabled bool `json:"authenticationEnabled"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&session); err != nil {
+		response.Body.Close()
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || session.AuthenticationEnabled {
+		t.Fatalf("session returned HTTP %d with authenticationEnabled=%v", response.StatusCode, session.AuthenticationEnabled)
+	}
+
+	tokenResponse := adminRequestForTest(t, testServer.URL, nil, http.MethodPost, "/api/v1/pairing-tokens", nil)
+	tokenResponse.Body.Close()
+	if tokenResponse.StatusCode != http.StatusCreated {
+		t.Fatalf("passwordless token creation returned HTTP %d", tokenResponse.StatusCode)
+	}
+
+	payload, _ := json.Marshal(map[string]string{"username": "admin", "password": "unused"})
+	loginResponse := adminRequestForTest(t, testServer.URL, nil, http.MethodPost, "/api/v1/auth/login", payload)
+	loginResponse.Body.Close()
+	if loginResponse.StatusCode != http.StatusConflict {
+		t.Fatalf("login while authentication is disabled returned HTTP %d, want 409", loginResponse.StatusCode)
+	}
+}
+
+func TestWakeOperationIsAdvisory(t *testing.T) {
+	dataStore, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "wollet.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	sender := &fakeWOLSender{}
+	cfg := config.Config{AdminUsername: "admin", SessionTTL: time.Hour, OfflineAfter: time.Minute, TokenTTL: 5 * time.Minute}
+	app := New(cfg, dataStore, sender, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer app.Close()
+	testServer := httptest.NewServer(app)
+	defer testServer.Close()
+
+	token := createTokenForTest(t, testServer.URL, nil)
+	deviceID, _ := bindForTest(t, testServer.URL, token)
+	for attempt := 0; attempt < 2; attempt++ {
+		response := adminRequestForTest(t, testServer.URL, nil, http.MethodPost, "/api/v1/devices/"+deviceID+"/wake", nil)
+		var payload map[string]string
+		if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+			response.Body.Close()
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK || payload["operation"] != deviceOperationWaking {
+			t.Fatalf("wake attempt %d returned HTTP %d with %#v", attempt+1, response.StatusCode, payload)
+		}
+	}
+
+	if got := app.operations.get(deviceID); got != deviceOperationWaking {
+		t.Fatalf("operation = %q, want %q", got, deviceOperationWaking)
+	}
+	sender.mu.Lock()
+	sent := len(sender.macs)
+	sender.mu.Unlock()
+	if sent != 2 {
+		t.Fatalf("sent %d Wake-on-LAN packets, want 2", sent)
+	}
 }

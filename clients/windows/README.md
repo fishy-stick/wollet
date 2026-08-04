@@ -44,6 +44,7 @@ dotnet publish Wollet.Client/Wollet.Client.csproj \
 
 - UAC、不同缩放比例下的安装界面和错误提示。
 - 启动界面能区分 Service 未安装、停止、在线、离线和服务端不可达。
+- 首次安装时可直接使用 Web Token 弹窗复制的服务器地址和 Token，Token 输入框会提示首次绑定用途。
 - 首次安装、重复修复、无效凭据重新绑定。
 - 卸载客户端会停止并删除 Service、本地凭据和已安装程序。
 - `%ProgramData%\Wollet\client.json` 的 DPAPI 和 ACL。

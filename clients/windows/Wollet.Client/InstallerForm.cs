@@ -62,7 +62,7 @@ internal sealed class InstallerForm : Form
 
         layout.Controls.Add(CreateFieldLabel("绑定 Token"), 0, 2);
         _tokenTextBox.Dock = DockStyle.Fill;
-        _tokenTextBox.PlaceholderText = "已有有效配置时可以留空";
+        _tokenTextBox.PlaceholderText = "首次绑定请输入网页端生成的 Token";
         _tokenTextBox.CharacterCasing = CharacterCasing.Upper;
         _tokenTextBox.Margin = new Padding(12, 3, 0, 12);
         layout.Controls.Add(_tokenTextBox, 1, 2);

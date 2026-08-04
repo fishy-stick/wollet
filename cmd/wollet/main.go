@@ -41,6 +41,9 @@ func runServer() error {
 		return err
 	}
 	logger := newLogger(cfg.LogLevel)
+	if cfg.AdminPassword == "" {
+		logger.Warn("admin authentication is disabled because WOLLET_ADMIN_PASSWORD is not set; use only on a trusted LAN or VPN")
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 

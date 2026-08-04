@@ -5,8 +5,11 @@ const state = {
   selectedId: readSelectedDevice(),
   events: null,
   busyDeviceId: null,
+  authEnabled: true,
   confirmAction: null,
+  confirmTimer: null,
   tokenTimer: null,
+  tokenDeviceIds: null,
   toastTimer: null,
 };
 
@@ -39,9 +42,11 @@ document.addEventListener("DOMContentLoaded", () => {
     tokenValue: document.querySelector("#token-value"),
     tokenCountdown: document.querySelector("#token-countdown"),
     copyToken: document.querySelector("#copy-token"),
+    copyServer: document.querySelector("#copy-server"),
     confirmDialog: document.querySelector("#confirm-dialog"),
     confirmTitle: document.querySelector("#confirm-title"),
     confirmMessage: document.querySelector("#confirm-message"),
+    confirmCountdown: document.querySelector("#confirm-countdown"),
     confirmCancel: document.querySelector("#confirm-cancel"),
     confirmSubmit: document.querySelector("#confirm-submit"),
     toast: document.querySelector("#toast"),
@@ -60,14 +65,17 @@ function bindInteractions() {
   elements.deviceAction.addEventListener("click", confirmDeviceAction);
   elements.removeDevice.addEventListener("click", confirmRemoveDevice);
   elements.copyToken.addEventListener("click", copyToken);
+  elements.copyServer.addEventListener("click", copyServerAddress);
   elements.tokenDialog.addEventListener("close", clearTokenDialog);
+  elements.confirmDialog.addEventListener("close", clearConfirmDialog);
   elements.confirmCancel.addEventListener("click", () => elements.confirmDialog.close());
   elements.confirmSubmit.addEventListener("click", runConfirmedAction);
 }
 
 async function bootstrap() {
   try {
-    await api("/api/v1/auth/session");
+    const session = await api("/api/v1/auth/session");
+    state.authEnabled = session.authenticationEnabled !== false;
     showApp();
   } catch (error) {
     if (error.status === 401) {
@@ -92,6 +100,7 @@ async function showApp() {
   elements.bootView.hidden = true;
   elements.loginView.hidden = true;
   elements.appView.hidden = false;
+  elements.logout.hidden = !state.authEnabled;
   try {
     const response = await api("/api/v1/devices");
     applySnapshot(response.devices || []);
@@ -111,10 +120,11 @@ async function login(event) {
   elements.loginButton.disabled = true;
   elements.loginButton.textContent = "登录中…";
   try {
-    await api("/api/v1/auth/login", {
+    const session = await api("/api/v1/auth/login", {
       method: "POST",
       body: { username: elements.username.value, password: elements.password.value },
     });
+    state.authEnabled = session.authenticationEnabled !== false;
     elements.password.value = "";
     await showApp();
   } catch (error) {
@@ -136,6 +146,7 @@ function togglePassword() {
 }
 
 async function logout() {
+  if (!state.authEnabled) return;
   try {
     await api("/api/v1/auth/logout", { method: "POST" });
   } finally {
@@ -152,16 +163,17 @@ function openEvents() {
     applySnapshot(payload.devices || []);
   });
   source.addEventListener("device.updated", event => {
+    applyDeviceUpdate(JSON.parse(event.data));
+  });
+  source.addEventListener("device.wake_timeout", event => {
     const device = JSON.parse(event.data);
-    const index = state.devices.findIndex(item => item.id === device.id);
-    if (index === -1) {
-      state.devices.push(device);
-    } else {
-      state.devices[index] = device;
-    }
-    sortDevices();
-    ensureSelection();
-    render();
+    applyDeviceUpdate(device);
+    showToast(`仍未检测到“${device.name}”上线，可以再次尝试唤醒`);
+  });
+  source.addEventListener("device.shutdown_timeout", event => {
+    const device = JSON.parse(event.data);
+    applyDeviceUpdate(device);
+    showToast(`“${device.name}”仍然在线，可以再次尝试关机`);
   });
   source.addEventListener("device.removed", event => {
     const payload = JSON.parse(event.data);
@@ -185,10 +197,37 @@ function closeEvents() {
 }
 
 function applySnapshot(devices) {
+  const pairedDevice = findNewlyPairedDevice(devices);
   state.devices = devices;
   sortDevices();
   ensureSelection();
   render();
+  closeTokenDialogForDevice(pairedDevice);
+}
+
+function applyDeviceUpdate(device) {
+  const index = state.devices.findIndex(item => item.id === device.id);
+  const isNew = index === -1;
+  if (isNew) {
+    state.devices.push(device);
+  } else {
+    state.devices[index] = device;
+  }
+  sortDevices();
+  ensureSelection();
+  render();
+  closeTokenDialogForDevice(isNew ? device : null);
+}
+
+function findNewlyPairedDevice(devices) {
+  if (!elements.tokenDialog.open || !state.tokenDeviceIds) return null;
+  return devices.find(device => !state.tokenDeviceIds.has(device.id)) || null;
+}
+
+function closeTokenDialogForDevice(device) {
+  if (!device || !elements.tokenDialog.open || !state.tokenDeviceIds || state.tokenDeviceIds.has(device.id)) return;
+  elements.tokenDialog.close();
+  showToast(`设备“${device.name}”已绑定`);
 }
 
 function sortDevices() {
@@ -222,35 +261,55 @@ function render() {
     return;
   }
 
+  const presentation = devicePresentation(device);
   elements.deviceName.textContent = device.name;
-  elements.deviceStatus.textContent = device.status === "online" ? "在线" : "离线";
-  elements.deviceStatus.dataset.status = device.status;
+  elements.deviceStatus.textContent = presentation.statusText;
+  elements.deviceStatus.dataset.status = presentation.statusKey;
   const lastSeen = device.status === "online" ? "刚刚" : formatLastSeen(device.lastSeenAt);
-  elements.deviceMeta.textContent = `${device.macAddress} · ${lastSeen}`;
+  elements.deviceMeta.textContent = `${device.macAddress} · ${presentation.detail || lastSeen}`;
 
   const isOnline = device.status === "online";
   const isBusy = state.busyDeviceId === device.id;
   elements.deviceAction.dataset.action = isOnline ? "shutdown" : "wake";
-  elements.deviceActionLabel.textContent = isBusy ? "处理中…" : (isOnline ? "关机" : "唤醒");
+  if (device.operation) {
+    elements.deviceAction.dataset.operation = device.operation;
+  } else {
+    delete elements.deviceAction.dataset.operation;
+  }
+  elements.deviceActionLabel.textContent = isBusy ? "处理中…" : presentation.actionText;
   elements.deviceAction.disabled = isBusy;
-  elements.deviceAction.setAttribute("aria-label", `${isOnline ? "关闭" : "唤醒"}${device.name}`);
+  elements.deviceAction.setAttribute("aria-label", `${presentation.actionText}${device.name}，当前${presentation.statusText}`);
 
   elements.deviceRail.replaceChildren(...state.devices.map(makeDeviceTab));
   const activeTab = elements.deviceRail.querySelector('[aria-selected="true"]');
   activeTab?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
 }
 
+function devicePresentation(device) {
+  if (device.operation === "waking") {
+    return { statusKey: "waking", statusText: "开机中", detail: "已发送唤醒请求，等待设备上线", actionText: "再次唤醒" };
+  }
+  if (device.operation === "shutting_down") {
+    return { statusKey: "shutting_down", statusText: "关机中", detail: "关机指令已送达，等待设备离线", actionText: "再次关机" };
+  }
+  if (device.status === "online") {
+    return { statusKey: "online", statusText: "在线", detail: "", actionText: "关机" };
+  }
+  return { statusKey: "offline", statusText: "离线", detail: "", actionText: "唤醒" };
+}
+
 function makeDeviceTab(device) {
+  const presentation = devicePresentation(device);
   const button = document.createElement("button");
   button.type = "button";
   button.className = "device-tab";
   button.setAttribute("role", "tab");
   button.setAttribute("aria-selected", String(device.id === state.selectedId));
-  button.setAttribute("aria-label", `${device.name}，${device.status === "online" ? "在线" : "离线"}`);
+  button.setAttribute("aria-label", `${device.name}，${presentation.statusText}`);
 
   const dot = document.createElement("span");
   dot.className = "device-tab__dot";
-  dot.dataset.status = device.status;
+  dot.dataset.status = presentation.statusKey;
   dot.setAttribute("aria-hidden", "true");
   const label = document.createElement("span");
   label.textContent = device.name;
@@ -267,21 +326,46 @@ function confirmDeviceAction() {
   const device = selectedDevice();
   if (!device) return;
   if (device.status === "online") {
-    showConfirm({
-      title: `关闭“${device.name}”？`,
-      message: "指令送达后，电脑将立即关机。",
-      submitText: "确认关机",
-      action: () => controlDevice(device, "shutdown"),
-    });
+    showShutdownCountdown(device);
   } else {
     showConfirm({
-      title: `唤醒“${device.name}”？`,
-      message: "服务端将向局域网发送 Wake-on-LAN 数据包。",
-      submitText: "发送唤醒",
+      title: `${device.operation === "waking" ? "再次" : ""}唤醒“${device.name}”？`,
+      message: device.operation === "waking"
+        ? "已经发送过唤醒请求，设备仍未上线。可以再次发送 Wake-on-LAN 数据包。"
+        : "服务端将向局域网发送 Wake-on-LAN 数据包。",
+      submitText: device.operation === "waking" ? "再次发送" : "发送唤醒",
       danger: false,
       action: () => controlDevice(device, "wake"),
     });
   }
+}
+
+function showShutdownCountdown(device) {
+  const repeated = device.operation === "shutting_down";
+  showConfirm({
+    title: `${repeated ? "再次" : ""}关闭“${device.name}”？`,
+    message: repeated
+      ? "关机指令已经送达，但设备仍在线。可以取消，或再次发送关机指令。"
+      : "关机指令将在倒计时结束后发送。可以取消，或立即关机。",
+    submitText: "立即关机",
+    action: () => controlDevice(device, "shutdown"),
+  });
+
+  const deadline = Date.now() + 10_000;
+  elements.confirmCountdown.hidden = false;
+  updateShutdownCountdown(deadline);
+  state.confirmTimer = window.setInterval(() => updateShutdownCountdown(deadline), 250);
+}
+
+function updateShutdownCountdown(deadline) {
+  const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+  elements.confirmCountdown.textContent = `${remaining} 秒`;
+  if (remaining > 0) return;
+
+  const action = state.confirmAction;
+  state.confirmAction = null;
+  elements.confirmDialog.close();
+  if (action) void action();
 }
 
 function confirmRemoveDevice() {
@@ -296,6 +380,7 @@ function confirmRemoveDevice() {
 }
 
 function showConfirm({ title, message, submitText, danger = true, action }) {
+  clearConfirmDialog();
   elements.confirmTitle.textContent = title;
   elements.confirmMessage.textContent = message;
   elements.confirmSubmit.textContent = submitText;
@@ -304,6 +389,18 @@ function showConfirm({ title, message, submitText, danger = true, action }) {
   state.confirmAction = action;
   elements.confirmDialog.showModal();
   elements.confirmCancel.focus();
+}
+
+function clearConfirmDialog() {
+  if (state.confirmTimer) {
+    window.clearInterval(state.confirmTimer);
+    state.confirmTimer = null;
+  }
+  state.confirmAction = null;
+  if (elements.confirmCountdown) {
+    elements.confirmCountdown.hidden = true;
+    elements.confirmCountdown.textContent = "";
+  }
 }
 
 async function runConfirmedAction() {
@@ -319,8 +416,13 @@ async function controlDevice(device, action) {
   state.busyDeviceId = device.id;
   render();
   try {
-    await api(`/api/v1/devices/${encodeURIComponent(device.id)}/${action}`, { method: "POST" });
-    showToast(action === "shutdown" ? "关机指令已送达" : "唤醒数据包已发送");
+    const response = await api(`/api/v1/devices/${encodeURIComponent(device.id)}/${action}`, { method: "POST" });
+    const current = state.devices.find(item => item.id === device.id);
+    if (current && response?.operation) {
+      current.operation = response.operation;
+      render();
+    }
+    showToast(action === "shutdown" ? "关机指令已送达，等待设备离线" : "唤醒数据包已发送，等待设备上线");
   } catch (error) {
     showToast(error.message || "操作失败");
   } finally {
@@ -362,8 +464,10 @@ async function createPairingToken() {
 
 function showToken(token, expiresAt) {
   clearTokenDialog();
+  state.tokenDeviceIds = new Set(state.devices.map(device => device.id));
   elements.tokenValue.textContent = token;
-  elements.copyToken.textContent = "复制";
+  elements.copyToken.textContent = "复制 Token";
+  elements.copyServer.textContent = "复制服务器地址";
   updateTokenCountdown(expiresAt);
   state.tokenTimer = window.setInterval(() => updateTokenCountdown(expiresAt), 1000);
   elements.tokenDialog.showModal();
@@ -386,29 +490,52 @@ function clearTokenDialog() {
     window.clearInterval(state.tokenTimer);
     state.tokenTimer = null;
   }
+  state.tokenDeviceIds = null;
   if (elements.tokenValue) elements.tokenValue.textContent = "";
 }
 
 async function copyToken() {
   const token = elements.tokenValue.textContent;
   if (!token) return;
+  await copyValue(token, elements.copyToken, "复制 Token", "复制失败，请手动选择 Token");
+}
+
+async function copyServerAddress() {
+  await copyValue(window.location.origin, elements.copyServer, "复制服务器地址", "服务器地址复制失败");
+}
+
+async function copyValue(value, button, defaultText, failureMessage) {
   try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(token);
-    } else {
-      const input = document.createElement("textarea");
-      input.value = token;
-      input.setAttribute("readonly", "");
-      input.className = "clipboard-helper";
-      document.body.append(input);
-      input.select();
-      if (!document.execCommand("copy")) throw new Error("copy command failed");
-      input.remove();
-    }
-    elements.copyToken.textContent = "已复制";
-    window.setTimeout(() => { elements.copyToken.textContent = "复制"; }, 1400);
+    await writeClipboard(value);
+    button.textContent = "已复制";
+    window.setTimeout(() => { button.textContent = defaultText; }, 1400);
   } catch {
-    showToast("复制失败，请手动选择 Token");
+    showToast(failureMessage);
+  }
+}
+
+async function writeClipboard(value) {
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch {
+      // HTTP LAN deployments and browser permissions may reject the modern API.
+    }
+  }
+
+  const input = document.createElement("textarea");
+  input.value = value;
+  input.readOnly = true;
+  input.className = "clipboard-helper";
+  (elements.tokenDialog.open ? elements.tokenDialog : document.body).append(input);
+  try {
+    input.focus();
+    input.select();
+    input.setSelectionRange(0, input.value.length);
+    if (!document.execCommand("copy")) throw new Error("copy command failed");
+  } finally {
+    input.remove();
   }
 }
 

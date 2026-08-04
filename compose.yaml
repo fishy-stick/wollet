@@ -4,10 +4,14 @@ services:
       context: .
     network_mode: host
     user: "${WOLLET_UID:-1000}:${WOLLET_GID:-1000}"
-    env_file:
-      - .env
     environment:
+      WOLLET_ADMIN_USERNAME: "${WOLLET_ADMIN_USERNAME:-admin}"
+      WOLLET_ADMIN_PASSWORD: "${WOLLET_ADMIN_PASSWORD:-}"
+      WOLLET_LISTEN_ADDR: "${WOLLET_LISTEN_ADDR:-0.0.0.0:8080}"
       WOLLET_DB_PATH: /data/wollet.db
+      WOLLET_WOL_BROADCAST: "${WOLLET_WOL_BROADCAST:-255.255.255.255}"
+      WOLLET_WOL_PORT: "${WOLLET_WOL_PORT:-9}"
+      WOLLET_LOG_LEVEL: "${WOLLET_LOG_LEVEL:-info}"
     volumes:
       - ./data:/data
     restart: unless-stopped

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/fishy-stick/wollet/internal/devicehub"
+	"github.com/fishy-stick/wollet/internal/events"
 	"github.com/fishy-stick/wollet/internal/identity"
 	"github.com/fishy-stick/wollet/internal/store"
 )
@@ -33,14 +34,18 @@ func (s *Server) handleWakeDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "invalid_device_mac", "设备 MAC 地址无效")
 		return
 	}
+	s.operations.set(id, deviceOperationWaking, time.Now().UTC().Add(wakeOperationTimeout))
+	s.broker.Publish(events.Event{Type: "device.updated", DeviceID: id})
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	if err := s.wol.Send(ctx, mac); err != nil {
+		s.operations.clearIf(id, deviceOperationWaking)
+		s.broker.Publish(events.Event{Type: "device.updated", DeviceID: id})
 		s.logger.Error("send Wake-on-LAN packet", "device_id", id, "error", err)
 		writeError(w, http.StatusBadGateway, "wol_send_failed", "唤醒数据包发送失败")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "sent", "operation": deviceOperationWaking})
 }
 
 func (s *Server) handleShutdownDevice(w http.ResponseWriter, r *http.Request) {
@@ -66,7 +71,13 @@ func (s *Server) handleShutdownDevice(w http.ResponseWriter, r *http.Request) {
 	err = s.hub.SendShutdown(ctx, id, commandID)
 	switch {
 	case err == nil:
-		writeJSON(w, http.StatusOK, map[string]string{"status": "delivered", "commandId": commandID})
+		result := map[string]string{"status": "delivered", "commandId": commandID}
+		if s.hub.IsOnline(id) {
+			s.operations.set(id, deviceOperationShuttingDown, time.Now().UTC().Add(shutdownOperationTimeout))
+			s.broker.Publish(events.Event{Type: "device.updated", DeviceID: id})
+			result["operation"] = deviceOperationShuttingDown
+		}
+		writeJSON(w, http.StatusOK, result)
 	case errors.Is(err, devicehub.ErrCommandInProgress):
 		writeError(w, http.StatusConflict, "command_in_progress", "该设备已有正在发送的关机指令")
 	case errors.Is(err, devicehub.ErrOffline):
@@ -89,6 +100,7 @@ func (s *Server) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "database_error", "无法移除设备")
 		return
 	}
+	s.operations.clear(id)
 	s.hub.Disconnect(id, "device removed")
 	s.publishRemoved(id)
 	w.WriteHeader(http.StatusNoContent)

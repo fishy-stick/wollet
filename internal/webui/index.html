@@ -91,9 +91,12 @@
   <dialog id="token-dialog" class="dialog dialog--token" aria-labelledby="token-title">
     <form method="dialog" class="dialog__surface">
       <h2 id="token-title">绑定新设备</h2>
-      <p class="dialog__description">在 Windows 客户端中输入以下 Token</p>
+      <p class="dialog__description">将服务器地址和 Token 填入 Windows 客户端</p>
       <output id="token-value" class="token-value" aria-label="绑定 Token"></output>
-      <button id="copy-token" class="button button--outline" type="button">复制</button>
+      <div class="token-actions">
+        <button id="copy-token" class="button button--outline" type="button">复制 Token</button>
+        <button id="copy-server" class="button button--quiet" type="button">复制服务器地址</button>
+      </div>
       <p id="token-countdown" class="token-countdown"></p>
       <p class="dialog__note">Token 仅显示一次</p>
       <button class="text-button dialog__close" value="close">关闭</button>
@@ -104,6 +107,7 @@
     <div class="dialog__surface dialog__surface--confirm">
       <h2 id="confirm-title"></h2>
       <p id="confirm-message" class="dialog__description"></p>
+      <output id="confirm-countdown" class="shutdown-countdown" aria-live="polite" hidden></output>
       <div class="dialog__actions">
         <button id="confirm-cancel" class="button button--quiet" type="button">取消</button>
         <button id="confirm-submit" class="button button--danger" type="button"></button>

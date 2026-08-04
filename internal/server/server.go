@@ -37,14 +37,17 @@ type Server struct {
 	sessions      *auth.SessionManager
 	loginLimiter  *auth.Limiter
 	bindLimiter   *auth.Limiter
+	authEnabled   bool
 	adminUserHash [sha256.Size]byte
 	adminPassHash [sha256.Size]byte
 	hub           *devicehub.Hub
 	broker        *events.Broker
+	operations    *deviceOperations
 	wol           WOLSender
 }
 
 func New(cfg config.Config, dataStore *store.Store, sender WOLSender, logger *slog.Logger) *Server {
+	authEnabled := cfg.AdminPassword != ""
 	adminPasswordHash := sha256.Sum256([]byte(cfg.AdminPassword))
 	cfg.AdminPassword = ""
 	server := &Server{
@@ -55,9 +58,11 @@ func New(cfg config.Config, dataStore *store.Store, sender WOLSender, logger *sl
 		sessions:      auth.NewSessionManager(cfg.SessionTTL),
 		loginLimiter:  auth.NewLimiter(5, time.Minute),
 		bindLimiter:   auth.NewLimiter(30, time.Minute),
+		authEnabled:   authEnabled,
 		adminUserHash: sha256.Sum256([]byte(cfg.AdminUsername)),
 		adminPassHash: adminPasswordHash,
 		broker:        events.NewBroker(),
+		operations:    newDeviceOperations(),
 		wol:           sender,
 	}
 	server.hub = devicehub.New(cfg.OfflineAfter, logger, server.onDeviceActivity)
@@ -109,6 +114,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) StartBackground(ctx context.Context) {
 	go s.runHeartbeatSweeper(ctx)
+	go s.runOperationSweeper(ctx)
 	go s.runCleanup(ctx)
 }
 
@@ -125,6 +131,25 @@ func (s *Server) runHeartbeatSweeper(ctx context.Context) {
 			return
 		case now := <-ticker.C:
 			s.hub.Sweep(now.UTC())
+		}
+	}
+}
+
+func (s *Server) runOperationSweeper(ctx context.Context) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			for _, operation := range s.operations.expire(now.UTC()) {
+				eventType := "device.shutdown_timeout"
+				if operation.kind == deviceOperationWaking {
+					eventType = "device.wake_timeout"
+				}
+				s.broker.Publish(events.Event{Type: eventType, DeviceID: operation.deviceID})
+			}
 		}
 	}
 }
@@ -151,6 +176,11 @@ func (s *Server) runCleanup(ctx context.Context) {
 }
 
 func (s *Server) onDeviceActivity(deviceID string, activity devicehub.Activity, at time.Time) {
+	if activity == devicehub.ActivityOnline {
+		s.operations.clearIf(deviceID, deviceOperationWaking)
+	} else if activity == devicehub.ActivityOffline {
+		s.operations.clearIf(deviceID, deviceOperationShuttingDown)
+	}
 	if activity == devicehub.ActivityOnline || activity == devicehub.ActivityHeartbeat {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		err := s.store.TouchDevice(ctx, deviceID, at)
@@ -186,6 +216,10 @@ func (s *Server) setSecurityHeaders(header http.Header) {
 
 func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.authEnabled {
+			next(w, r)
+			return
+		}
 		cookie, err := r.Cookie(sessionCookieName)
 		if err != nil || !s.sessions.Valid(cookie.Value, time.Now().UTC()) {
 			writeError(w, http.StatusUnauthorized, "authentication_required", "请先登录")
