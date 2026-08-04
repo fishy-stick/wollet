@@ -10,6 +10,7 @@ internal sealed class InstallerForm : Form
     private readonly TextBox _serverTextBox = new();
     private readonly TextBox _tokenTextBox = new();
     private readonly Button _installButton = new();
+    private readonly Button _uninstallButton = new();
     private readonly Label _statusLabel = new();
 
     public InstallerForm(InstallCoordinator coordinator)
@@ -18,8 +19,8 @@ internal sealed class InstallerForm : Form
         Text = "Wollet";
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(520, 245);
-        MinimumSize = new Size(480, 245);
+        ClientSize = new Size(520, 320);
+        MinimumSize = new Size(480, 320);
         MaximizeBox = false;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         BuildLayout();
@@ -68,14 +69,32 @@ internal sealed class InstallerForm : Form
 
         _installButton.AutoSize = true;
         _installButton.Text = "安装并绑定";
-        _installButton.Anchor = AnchorStyles.Right;
         _installButton.Padding = new Padding(12, 4, 12, 4);
         _installButton.Click += InstallButtonOnClick;
-        layout.Controls.Add(_installButton, 1, 3);
 
-        _statusLabel.AutoSize = true;
+        _uninstallButton.AutoSize = true;
+        _uninstallButton.Text = "卸载客户端";
+        _uninstallButton.Padding = new Padding(12, 4, 12, 4);
+        _uninstallButton.Click += UninstallButtonOnClick;
+
+        var actions = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            Anchor = AnchorStyles.Right,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false,
+            Margin = Padding.Empty,
+        };
+        actions.Controls.Add(_installButton);
+        actions.Controls.Add(_uninstallButton);
+        layout.Controls.Add(actions, 1, 3);
+
+        _statusLabel.AutoSize = false;
+        _statusLabel.Dock = DockStyle.Fill;
         _statusLabel.ForeColor = SystemColors.GrayText;
         _statusLabel.Margin = new Padding(0, 16, 0, 0);
+        _statusLabel.TextAlign = ContentAlignment.TopLeft;
+        _statusLabel.UseMnemonic = false;
         layout.Controls.Add(_statusLabel, 0, 4);
         layout.SetColumnSpan(_statusLabel, 2);
 
@@ -93,18 +112,24 @@ internal sealed class InstallerForm : Form
 
     private async void OnShown(object? sender, EventArgs eventArgs)
     {
+        _installButton.Select();
+        SetStatus("正在检查后台服务状态…", isError: false);
         try
         {
-            var existing = await _coordinator.TryLoadExistingAsync(_lifetime.Token);
-            if (existing is not null)
+            var inspection = await _coordinator.InspectAsync(_lifetime.Token);
+            if (inspection.Credentials is not null)
             {
-                _serverTextBox.Text = existing.Server.AbsoluteUri.TrimEnd('/');
-                SetStatus("检测到现有配置；可直接修复安装，或使用新地址和 Token 重新绑定。", isError: false);
+                _serverTextBox.Text = inspection.Credentials.Server.AbsoluteUri.TrimEnd('/');
             }
+
+            SetStatus(inspection.Message, inspection.IsError, inspection.IsSuccess);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
         }
         catch (Exception exception)
         {
-            SetStatus("现有配置无法读取：" + exception.Message, isError: true);
+            SetStatus("后台服务状态检查失败：" + exception.Message, isError: true);
         }
     }
 
@@ -113,7 +138,7 @@ internal sealed class InstallerForm : Form
         SetBusy(true);
         try
         {
-            var progress = new Progress<string>(message => SetStatus(message, isError: false));
+            var progress = new ControlProgress(this, message => SetStatus(message, isError: false));
             var result = await _coordinator.InstallAsync(
                 _serverTextBox.Text,
                 _tokenTextBox.Text,
@@ -132,7 +157,57 @@ internal sealed class InstallerForm : Form
         }
         catch (Exception exception)
         {
-            SetStatus(exception.Message, isError: true);
+            ShowError(exception.Message);
+        }
+        finally
+        {
+            if (!IsDisposed)
+            {
+                SetBusy(false);
+            }
+        }
+    }
+
+    private async void UninstallButtonOnClick(object? sender, EventArgs eventArgs)
+    {
+        var confirmation = MessageBox.Show(
+            this,
+            "卸载会停止并删除 Wollet Windows Service、已安装程序和本地设备凭据。" +
+            Environment.NewLine + Environment.NewLine +
+            "服务端中的设备记录不会自动删除，仍需在管理页面中手动移除。是否继续？",
+            "卸载 Wollet",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2);
+        if (confirmation != DialogResult.Yes)
+        {
+            return;
+        }
+
+        SetBusy(true);
+        try
+        {
+            var progress = new ControlProgress(this, message => SetStatus(message, isError: false));
+            var result = await _coordinator.UninstallAsync(progress, _lifetime.Token);
+            _serverTextBox.Clear();
+            _tokenTextBox.Clear();
+            var message = result.RebootRequired
+                ? "客户端已卸载；已安装程序将在 Windows 重启后完成删除。"
+                : "客户端、Windows Service 和本地凭据已卸载。";
+            SetStatus(message, isError: false, isSuccess: true);
+            MessageBox.Show(
+                this,
+                message,
+                "卸载完成",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            ShowError("卸载失败：" + exception.Message);
         }
         finally
         {
@@ -148,7 +223,19 @@ internal sealed class InstallerForm : Form
         _serverTextBox.Enabled = !busy;
         _tokenTextBox.Enabled = !busy;
         _installButton.Enabled = !busy;
+        _uninstallButton.Enabled = !busy;
         UseWaitCursor = busy;
+    }
+
+    private void ShowError(string message)
+    {
+        SetStatus(message, isError: true);
+        MessageBox.Show(
+            this,
+            message,
+            "操作失败",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Error);
     }
 
     private void SetStatus(string message, bool isError, bool isSuccess = false)
@@ -159,5 +246,33 @@ internal sealed class InstallerForm : Form
             : isSuccess
                 ? Color.ForestGreen
                 : SystemColors.GrayText;
+    }
+
+    private sealed class ControlProgress : IProgress<string>
+    {
+        private readonly Control _control;
+        private readonly Action<string> _handler;
+
+        public ControlProgress(Control control, Action<string> handler)
+        {
+            _control = control;
+            _handler = handler;
+        }
+
+        public void Report(string value)
+        {
+            if (_control.IsDisposed || _control.Disposing)
+            {
+                return;
+            }
+
+            if (_control.InvokeRequired)
+            {
+                _control.Invoke(_handler, value);
+                return;
+            }
+
+            _handler(value);
+        }
     }
 }

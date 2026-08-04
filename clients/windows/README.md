@@ -43,7 +43,9 @@ dotnet publish Wollet.Client/Wollet.Client.csproj \
 首次在 Windows 上运行时，重点检查：
 
 - UAC、不同缩放比例下的安装界面和错误提示。
+- 启动界面能区分 Service 未安装、停止、在线、离线和服务端不可达。
 - 首次安装、重复修复、无效凭据重新绑定。
+- 卸载客户端会停止并删除 Service、本地凭据和已安装程序。
 - `%ProgramData%\Wollet\client.json` 的 DPAPI 和 ACL。
 - Service 使用 `LocalService` 自动启动；安装器仅额外授予 `SeShutdownPrivilege`，并配置 5/15/30 秒失败重启策略。
 - 多网卡、VPN 和无线网络下的路由网卡选择。

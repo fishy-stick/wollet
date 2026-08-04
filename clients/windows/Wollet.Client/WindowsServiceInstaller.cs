@@ -5,6 +5,18 @@ using Microsoft.Win32.SafeHandles;
 
 namespace Wollet.Client;
 
+internal enum WindowsServiceState
+{
+    NotInstalled,
+    Stopped,
+    Starting,
+    Stopping,
+    Running,
+    Paused,
+    Transitioning,
+    Unknown,
+}
+
 internal sealed class WindowsServiceInstaller
 {
     public const string ServiceName = "Wollet";
@@ -17,6 +29,7 @@ internal sealed class WindowsServiceInstaller
     private const uint ServiceStart = 0x0010;
     private const uint ServiceStop = 0x0020;
     private const uint ServiceChangeConfig = 0x0002;
+    private const uint ServiceDelete = 0x00010000;
     private const uint ServiceWin32OwnProcess = 0x00000010;
     private const uint ServiceAutoStart = 0x00000002;
     private const uint ServiceErrorNormal = 0x00000001;
@@ -26,15 +39,20 @@ internal sealed class WindowsServiceInstaller
     private const int ServiceStartPending = 0x00000002;
     private const int ServiceStopPending = 0x00000003;
     private const int ServiceRunning = 0x00000004;
+    private const int ServiceContinuePending = 0x00000005;
+    private const int ServicePausePending = 0x00000006;
+    private const int ServicePaused = 0x00000007;
     private const int ScStatusProcessInfo = 0;
     private const int ServiceConfigDescription = 1;
     private const int ServiceConfigFailureActions = 2;
     private const int ServiceConfigFailureActionsFlag = 4;
     private const int ScActionRestart = 1;
     private const uint RecoveryResetPeriodSeconds = 24 * 60 * 60;
+    private const uint MoveFileDelayUntilReboot = 0x00000004;
     private const int ErrorServiceDoesNotExist = 1060;
     private const int ErrorServiceNotActive = 1062;
     private const int ErrorServiceAlreadyRunning = 1056;
+    private const int ErrorServiceMarkedForDelete = 1072;
     private static readonly TimeSpan StateChangeTimeout = TimeSpan.FromSeconds(20);
 
     private readonly WindowsPaths _paths;
@@ -42,6 +60,27 @@ internal sealed class WindowsServiceInstaller
     public WindowsServiceInstaller(WindowsPaths paths)
     {
         _paths = paths;
+    }
+
+    public WindowsServiceState GetState()
+    {
+        using var manager = OpenManager(ScManagerConnect);
+        using var service = TryOpenService(manager, ServiceName, ServiceQueryStatus);
+        if (service is null)
+        {
+            return WindowsServiceState.NotInstalled;
+        }
+
+        return QueryState(service) switch
+        {
+            ServiceStopped => WindowsServiceState.Stopped,
+            ServiceStartPending => WindowsServiceState.Starting,
+            ServiceStopPending => WindowsServiceState.Stopping,
+            ServiceRunning => WindowsServiceState.Running,
+            ServicePaused => WindowsServiceState.Paused,
+            ServiceContinuePending or ServicePausePending => WindowsServiceState.Transitioning,
+            _ => WindowsServiceState.Unknown,
+        };
     }
 
     public void ValidateSource()
@@ -154,6 +193,60 @@ internal sealed class WindowsServiceInstaller
         }
 
         await WaitForStateAsync(service, ServiceRunning, cancellationToken);
+    }
+
+    public async Task<bool> UninstallAsync(CancellationToken cancellationToken)
+    {
+        using (var manager = OpenManager(ScManagerConnect))
+        using (var service = TryOpenService(
+                   manager,
+                   ServiceName,
+                   ServiceQueryStatus | ServiceStop | ServiceDelete))
+        {
+            if (service is not null)
+            {
+                await StopAsync(service, cancellationToken);
+                if (!DeleteService(service))
+                {
+                    var error = Marshal.GetLastWin32Error();
+                    if (error != ErrorServiceMarkedForDelete)
+                    {
+                        throw new Win32Exception(error, "无法删除 Windows Service");
+                    }
+                }
+            }
+        }
+
+        RemoveEventSource();
+        return DeleteInstalledFiles();
+    }
+
+    private bool DeleteInstalledFiles()
+    {
+        if (!Directory.Exists(_paths.InstallDirectory))
+        {
+            return false;
+        }
+
+        var runningFromInstalledPath = File.Exists(_paths.InstalledExecutable) &&
+                                       PathsEqual(GetSourceExecutable(), _paths.InstalledExecutable);
+        if (!runningFromInstalledPath)
+        {
+            Directory.Delete(_paths.InstallDirectory, recursive: true);
+            return false;
+        }
+
+        if (!MoveFileExW(_paths.InstalledExecutable, null, MoveFileDelayUntilReboot))
+        {
+            throw LastWin32Exception("无法安排删除已安装程序");
+        }
+
+        if (!MoveFileExW(_paths.InstallDirectory, null, MoveFileDelayUntilReboot))
+        {
+            throw LastWin32Exception("无法安排删除安装目录");
+        }
+
+        return true;
     }
 
     private static async Task StopAsync(SafeServiceHandle service, CancellationToken cancellationToken)
@@ -299,6 +392,14 @@ internal sealed class WindowsServiceInstaller
         finally
         {
             Marshal.FreeHGlobal(actionPointer);
+        }
+    }
+
+    private static void RemoveEventSource()
+    {
+        if (EventLog.SourceExists(EventSourceName))
+        {
+            EventLog.DeleteEventSource(EventSourceName);
         }
     }
 
@@ -462,6 +563,10 @@ internal sealed class WindowsServiceInstaller
 
     [DllImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeleteService(SafeServiceHandle service);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool StartServiceW(
         SafeServiceHandle service,
         int argumentCount,
@@ -482,6 +587,13 @@ internal sealed class WindowsServiceInstaller
         out ServiceStatusProcess status,
         int bufferSize,
         out int bytesNeeded);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool MoveFileExW(
+        string existingFileName,
+        string? newFileName,
+        uint flags);
 
     [DllImport("advapi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

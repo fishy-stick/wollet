@@ -101,6 +101,14 @@ internal sealed class WindowsCredentialStore
         }
     }
 
+    public void Delete()
+    {
+        if (Directory.Exists(_paths.ConfigDirectory))
+        {
+            Directory.Delete(_paths.ConfigDirectory, recursive: true);
+        }
+    }
+
     private void EnsureSecureDirectory()
     {
         var directory = Directory.CreateDirectory(_paths.ConfigDirectory);
