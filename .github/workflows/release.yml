@@ -1,0 +1,174 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  publish-image:
+    name: Publish Docker image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: metadata
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-windows-client:
+    name: Build Windows clients
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore clients/windows/Wollet.Windows.slnx
+
+      - name: Test
+        run: dotnet test --project clients/windows/Wollet.Client.Core.Tests/Wollet.Client.Core.Tests.csproj --configuration Release --no-restore
+
+      - name: Read release version
+        id: version
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          "value=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Publish client with .NET Runtime
+        run: >-
+          dotnet publish clients/windows/Wollet.Client/Wollet.Client.csproj
+          -p:PublishProfile=win-x64
+          -p:Version=${{ steps.version.outputs.value }}
+
+      - name: Publish framework-dependent client
+        run: >-
+          dotnet publish clients/windows/Wollet.Client/Wollet.Client.csproj
+          -p:PublishProfile=win-x64-framework-dependent
+          -p:Version=${{ steps.version.outputs.value }}
+
+      - name: Prepare release assets
+        shell: pwsh
+        run: |
+          $assetDir = Join-Path $env:RUNNER_TEMP "wollet-release"
+          New-Item -ItemType Directory -Path $assetDir | Out-Null
+
+          $publishDir = "clients/windows/Wollet.Client/bin/Release/net10.0-windows/win-x64/publish"
+          $runtimeClient = Join-Path $publishDir "wollet-client.exe"
+          $frameworkClient = Join-Path $publishDir "framework-dependent/wollet-client.exe"
+
+          if (-not (Test-Path -LiteralPath $runtimeClient)) {
+            throw "Runtime client was not produced: $runtimeClient"
+          }
+          if (-not (Test-Path -LiteralPath $frameworkClient)) {
+            throw "Framework-dependent client was not produced: $frameworkClient"
+          }
+
+          Copy-Item -LiteralPath $runtimeClient -Destination (Join-Path $assetDir "wollet-client-win-x64-runtime.exe")
+          Copy-Item -LiteralPath $frameworkClient -Destination (Join-Path $assetDir "wollet-client-win-x64-framework-dependent.exe")
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-release-assets
+          path: ${{ runner.temp }}/wollet-release/*.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  create-release:
+    name: Create GitHub Release
+    needs:
+      - publish-image
+      - build-windows-client
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Windows clients
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-release-assets
+          path: dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_NOTES: |
+            ## Windows 客户端
+
+            **如果你不知道该下载哪个版本，请选择 `wollet-client-win-x64-runtime.exe`。**
+            它已经包含 .NET Runtime，下载后可以直接运行。
+
+            - `wollet-client-win-x64-runtime.exe`：推荐，包含 .NET Runtime，文件较大。
+            - `wollet-client-win-x64-framework-dependent.exe`：体积较小，需要预先安装 x64 .NET 10 Desktop Runtime。
+
+            ## Docker 镜像
+
+            ```console
+            docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ```
+        run: >-
+          gh release create "${GITHUB_REF_NAME}" dist/*.exe
+          --verify-tag
+          --title "Wollet ${GITHUB_REF_NAME}"
+          --generate-notes
+          --notes "${RELEASE_NOTES}"
