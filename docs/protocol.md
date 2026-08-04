@@ -42,7 +42,8 @@
   ```json
   {
     "token": "M7K4P-2N8QX-R6T9C-V3W5D",
-    "expiresAt": "2026-08-04T00:05:00Z"
+    "expiresAt": "2026-08-04T00:05:00Z",
+    "expiresInSeconds": 300
   }
   ```
 

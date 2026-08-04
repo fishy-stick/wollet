@@ -328,9 +328,20 @@ func TestAuthenticationCanBeDisabled(t *testing.T) {
 	}
 
 	tokenResponse := adminRequestForTest(t, testServer.URL, nil, http.MethodPost, "/api/v1/pairing-tokens", nil)
-	tokenResponse.Body.Close()
 	if tokenResponse.StatusCode != http.StatusCreated {
+		tokenResponse.Body.Close()
 		t.Fatalf("passwordless token creation returned HTTP %d", tokenResponse.StatusCode)
+	}
+	var tokenPayload struct {
+		ExpiresInSeconds int `json:"expiresInSeconds"`
+	}
+	if err := json.NewDecoder(tokenResponse.Body).Decode(&tokenPayload); err != nil {
+		tokenResponse.Body.Close()
+		t.Fatal(err)
+	}
+	tokenResponse.Body.Close()
+	if tokenPayload.ExpiresInSeconds != 300 {
+		t.Fatalf("expiresInSeconds = %d, want 300", tokenPayload.ExpiresInSeconds)
 	}
 
 	payload, _ := json.Marshal(map[string]string{"username": "admin", "password": "unused"})

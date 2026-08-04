@@ -99,7 +99,9 @@ func (s *Server) handleCreatePairingToken(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "token_generation_failed", "无法生成绑定 Token")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"token": display, "expiresAt": expiresAt})
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"token": display, "expiresAt": expiresAt, "expiresInSeconds": int(s.cfg.TokenTTL / time.Second),
+	})
 }
 
 type deviceView struct {

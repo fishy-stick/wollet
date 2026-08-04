@@ -11,6 +11,7 @@ const state = {
   tokenTimer: null,
   tokenDeviceIds: null,
   toastTimer: null,
+  relativeTimeTimer: null,
 };
 
 const elements = {};
@@ -34,6 +35,7 @@ document.addEventListener("DOMContentLoaded", () => {
     deviceName: document.querySelector("#device-name"),
     deviceStatus: document.querySelector("#device-status"),
     deviceMeta: document.querySelector("#device-meta"),
+    deviceActivity: document.querySelector("#device-activity"),
     deviceAction: document.querySelector("#device-action"),
     deviceActionLabel: document.querySelector("#device-action-label"),
     deviceRail: document.querySelector("#device-rail"),
@@ -57,6 +59,12 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 function bindInteractions() {
+  document.addEventListener("keydown", event => {
+    if (event.key === "Tab") document.body.dataset.keyboardNavigation = "true";
+  });
+  document.addEventListener("pointerdown", () => {
+    delete document.body.dataset.keyboardNavigation;
+  });
   elements.loginForm.addEventListener("submit", login);
   elements.togglePassword.addEventListener("click", togglePassword);
   elements.createToken.addEventListener("click", createPairingToken);
@@ -70,6 +78,7 @@ function bindInteractions() {
   elements.confirmDialog.addEventListener("close", clearConfirmDialog);
   elements.confirmCancel.addEventListener("click", () => elements.confirmDialog.close());
   elements.confirmSubmit.addEventListener("click", runConfirmedAction);
+  state.relativeTimeTimer = window.setInterval(refreshSelectedDeviceMeta, 30_000);
 }
 
 async function bootstrap() {
@@ -265,8 +274,7 @@ function render() {
   elements.deviceName.textContent = device.name;
   elements.deviceStatus.textContent = presentation.statusText;
   elements.deviceStatus.dataset.status = presentation.statusKey;
-  const lastSeen = device.status === "online" ? "刚刚" : formatLastSeen(device.lastSeenAt);
-  elements.deviceMeta.textContent = `${device.macAddress} · ${presentation.detail || lastSeen}`;
+  renderDeviceMeta(device);
 
   const isOnline = device.status === "online";
   const isBusy = state.busyDeviceId === device.id;
@@ -287,15 +295,34 @@ function render() {
 
 function devicePresentation(device) {
   if (device.operation === "waking") {
-    return { statusKey: "waking", statusText: "开机中", detail: "已发送唤醒请求，等待设备上线", actionText: "再次唤醒" };
+    return { statusKey: "waking", statusText: "开机中", actionText: "再次唤醒" };
   }
   if (device.operation === "shutting_down") {
-    return { statusKey: "shutting_down", statusText: "关机中", detail: "关机指令已送达，等待设备离线", actionText: "再次关机" };
+    return { statusKey: "shutting_down", statusText: "关机中", actionText: "再次关机" };
   }
   if (device.status === "online") {
-    return { statusKey: "online", statusText: "在线", detail: "", actionText: "关机" };
+    return { statusKey: "online", statusText: "在线", actionText: "关机" };
   }
-  return { statusKey: "offline", statusText: "离线", detail: "", actionText: "唤醒" };
+  return { statusKey: "offline", statusText: "离线", actionText: "唤醒" };
+}
+
+function renderDeviceMeta(device) {
+  let activity = "连接正常";
+  if (device.operation === "waking") {
+    activity = "等待上线";
+  } else if (device.operation === "shutting_down") {
+    activity = "等待离线";
+  } else if (device.status !== "online") {
+    const lastSeen = formatLastSeen(device.lastSeenAt);
+    activity = lastSeen === "从未上线" ? lastSeen : `最后在线 ${lastSeen}`;
+  }
+  elements.deviceMeta.textContent = device.macAddress;
+  elements.deviceActivity.textContent = activity;
+}
+
+function refreshSelectedDeviceMeta() {
+  const device = selectedDevice();
+  if (device && !elements.deviceFocus.hidden) renderDeviceMeta(device);
 }
 
 function makeDeviceTab(device) {
@@ -327,13 +354,13 @@ function confirmDeviceAction() {
   if (!device) return;
   if (device.status === "online") {
     showShutdownCountdown(device);
+  } else if (device.operation !== "waking") {
+    void controlDevice(device, "wake");
   } else {
     showConfirm({
-      title: `${device.operation === "waking" ? "再次" : ""}唤醒“${device.name}”？`,
-      message: device.operation === "waking"
-        ? "已经发送过唤醒请求，设备仍未上线。可以再次发送 Wake-on-LAN 数据包。"
-        : "服务端将向局域网发送 Wake-on-LAN 数据包。",
-      submitText: device.operation === "waking" ? "再次发送" : "发送唤醒",
+      title: `再次唤醒“${device.name}”？`,
+      message: "已经发送过唤醒请求，设备仍未上线。可以再次发送 Wake-on-LAN 数据包。",
+      submitText: "再次发送",
       danger: false,
       action: () => controlDevice(device, "wake"),
     });
@@ -453,7 +480,7 @@ async function createPairingToken() {
   elements.emptyCreateToken.disabled = true;
   try {
     const response = await api("/api/v1/pairing-tokens", { method: "POST" });
-    showToken(response.token, response.expiresAt);
+    showToken(response.token, response.expiresAt, response.expiresInSeconds);
   } catch (error) {
     showToast(error.message || "无法生成绑定 Token");
   } finally {
@@ -462,20 +489,24 @@ async function createPairingToken() {
   }
 }
 
-function showToken(token, expiresAt) {
+function showToken(token, expiresAt, expiresInSeconds) {
   clearTokenDialog();
   state.tokenDeviceIds = new Set(state.devices.map(device => device.id));
   elements.tokenValue.textContent = token;
   elements.copyToken.textContent = "复制 Token";
   elements.copyServer.textContent = "复制服务器地址";
-  updateTokenCountdown(expiresAt);
-  state.tokenTimer = window.setInterval(() => updateTokenCountdown(expiresAt), 1000);
+  const ttlSeconds = Number(expiresInSeconds);
+  const deadline = Number.isFinite(ttlSeconds) && ttlSeconds > 0
+    ? Date.now() + ttlSeconds * 1000
+    : new Date(expiresAt).getTime();
+  updateTokenCountdown(deadline);
+  state.tokenTimer = window.setInterval(() => updateTokenCountdown(deadline), 1000);
   elements.tokenDialog.showModal();
   elements.copyToken.focus();
 }
 
-function updateTokenCountdown(expiresAt) {
-  const remaining = Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 1000));
+function updateTokenCountdown(deadline) {
+  const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
   const minutes = String(Math.floor(remaining / 60)).padStart(2, "0");
   const seconds = String(remaining % 60).padStart(2, "0");
   elements.tokenCountdown.textContent = remaining > 0 ? `${minutes}:${seconds} 后过期` : "Token 已过期";

@@ -42,6 +42,12 @@ input {
 
 button {
   color: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus:not(:focus-visible),
+body:not([data-keyboard-navigation]) button:focus-visible {
+  outline: none;
 }
 
 [hidden] {
@@ -335,11 +341,20 @@ button {
 }
 
 .device-focus__meta {
-  margin: 18px 0 26px;
+  margin: 18px 0 0;
   color: var(--muted);
   font-size: clamp(16px, 1.5vw, 21px);
   line-height: 1.4;
   letter-spacing: .02em;
+  white-space: nowrap;
+}
+
+.device-focus__activity {
+  margin: 6px 0 26px;
+  color: var(--muted);
+  font-size: clamp(15px, 1.3vw, 19px);
+  line-height: 1.4;
+  white-space: nowrap;
 }
 
 .device-action {
@@ -700,9 +715,14 @@ button {
 
   .device-focus__meta {
     max-width: 100%;
-    margin: 18px 0 24px;
-    font-size: 16px;
-    overflow-wrap: anywhere;
+    margin-top: 18px;
+    font-size: 14px;
+  }
+
+  .device-focus__activity {
+    max-width: 100%;
+    margin: 5px 0 24px;
+    font-size: 14px;
   }
 
   .device-action {
