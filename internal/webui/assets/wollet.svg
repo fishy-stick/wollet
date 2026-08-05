@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="title">
+  <title id="title">Wollet</title>
+  <g fill="none" stroke="#0a58f5" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path transform="translate(0 -13)" d="M18 31a42 42 0 0 1 60 0M28 42a28 28 0 0 1 40 0M38 52a14 14 0 0 1 20 0"/>
+    <path d="M48 44v25M34 57a20 20 0 1 0 28 0"/>
+  </g>
+</svg>

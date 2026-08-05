@@ -1,8 +1,6 @@
 services:
   wollet:
     image: "${WOLLET_IMAGE:-ghcr.io/fishy-stick/wollet:latest}"
-    build:
-      context: .
     network_mode: host
     user: "${WOLLET_UID:-1000}:${WOLLET_GID:-1000}"
     environment:

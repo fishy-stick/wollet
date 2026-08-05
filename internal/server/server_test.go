@@ -45,6 +45,7 @@ func TestEmbeddedWebUI(t *testing.T) {
 	}{
 		{path: "/", contentType: "text/html", contains: "管理员登录"},
 		{path: "/assets/styles.css", contentType: "text/css", contains: "--blue: #0a58f5"},
+		{path: "/assets/wollet.svg", contentType: "image/svg+xml", contains: "<title id=\"title\">Wollet</title>"},
 		{path: "/assets/app.js", contentType: "text/javascript", contains: "EventSource"},
 	} {
 		request := httptest.NewRequest(http.MethodGet, test.path, nil)

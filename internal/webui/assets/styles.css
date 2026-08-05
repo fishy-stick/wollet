@@ -73,14 +73,9 @@ body:not([data-keyboard-navigation]) button:focus-visible {
 }
 
 .brand__mark {
+  display: block;
   width: 92px;
   height: 92px;
-  overflow: visible;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .brand__name {
