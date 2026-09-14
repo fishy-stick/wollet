@@ -22,7 +22,11 @@ internal static class Program
         var paths = new WindowsPaths();
         var credentialStore = new WindowsCredentialStore(paths);
         var deviceInfoProvider = new RouteDeviceInfoProvider();
-        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        // LAN requests must not inherit the user's system or environment proxy.
+        using var httpClient = new HttpClient(new HttpClientHandler { UseProxy = false })
+        {
+            Timeout = TimeSpan.FromSeconds(10),
+        };
         var coordinator = new InstallCoordinator(
             credentialStore,
             new WindowsServiceInstaller(paths),

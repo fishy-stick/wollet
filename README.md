@@ -127,6 +127,8 @@ Compose 默认使用 `ghcr.io/fishy-stick/wollet:latest`，数据库保存在 `.
 
 再次运行客户端可以检查服务状态、修复现有安装或卸载服务。客户端配置位于 `%ProgramData%\Wollet`，设备密钥由 Windows DPAPI 保护。
 
+Windows 客户端的绑定、状态检查和后台连接均直连服务端，不使用系统代理或代理环境变量。
+
 ## 配置
 
 | 环境变量 | 默认值 | 说明 |

@@ -152,12 +152,23 @@ public sealed class CoreTests
     }
 
     [TestMethod]
-    public async Task CompletesShutdownProtocolRoundTrip()
+    [DataRow(false)]
+    [DataRow(true)]
+    [DoNotParallelize]
+    public async Task CompletesShutdownProtocolRoundTrip(bool useUnavailableProxy)
     {
+        var originalProxy = HttpClient.DefaultProxy;
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         try
         {
+            if (useUnavailableProxy)
+            {
+                // Do not bypass loopback: the connection must explicitly ignore this proxy.
+                HttpClient.DefaultProxy = new WebProxy("http://127.0.0.1:1", false);
+                Assert.IsFalse(HttpClient.DefaultProxy.IsBypassed(new Uri("http://127.0.0.1")));
+            }
+
             var port = ((IPEndPoint)listener.LocalEndpoint).Port;
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             var serverTask = HandleWebSocketSessionAsync(listener, timeout.Token);
@@ -175,6 +186,7 @@ public sealed class CoreTests
         }
         finally
         {
+            HttpClient.DefaultProxy = originalProxy;
             listener.Stop();
         }
     }

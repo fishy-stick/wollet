@@ -67,6 +67,8 @@ public sealed class WolletConnectionRunner
         CancellationToken cancellationToken)
     {
         using var socket = new ClientWebSocket();
+        // Keep the service connection direct, just like binding and route detection.
+        socket.Options.Proxy = null;
         socket.Options.CollectHttpResponseDetails = true;
         socket.Options.SetRequestHeader("X-Wollet-Device-ID", credentials.DeviceId);
         socket.Options.SetRequestHeader("Authorization", "Bearer " + credentials.DeviceSecret);
