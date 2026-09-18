@@ -239,3 +239,5 @@ dotnet test --project clients/windows/Wollet.Client.Core.Tests/Wollet.Client.Cor
 ## 通信协议
 
 REST API、SSE 事件、客户端认证及 WebSocket 消息格式见 [docs/protocol.md](docs/protocol.md)。
+
+后续开发需求与待讨论事项见 [开发规划](docs/development-plan.md)。
