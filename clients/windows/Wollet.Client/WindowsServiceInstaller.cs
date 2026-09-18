@@ -2,22 +2,11 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
+using Wollet.Client.Core;
 
 namespace Wollet.Client;
 
-internal enum WindowsServiceState
-{
-    NotInstalled,
-    Stopped,
-    Starting,
-    Stopping,
-    Running,
-    Paused,
-    Transitioning,
-    Unknown,
-}
-
-internal sealed class WindowsServiceInstaller
+internal sealed class WindowsServiceInstaller : IClientInstaller
 {
     public const string ServiceName = "Wollet";
     public const string EventSourceName = "wollet-client";
@@ -93,41 +82,56 @@ internal sealed class WindowsServiceInstaller
         }
     }
 
-    public async Task PrepareAsync(CancellationToken cancellationToken)
+    public ClientUpdateVersion GetVersions() => new(
+        File.Exists(_paths.InstalledExecutable) ? FileVersionInfo.GetVersionInfo(_paths.InstalledExecutable).ProductVersion : null,
+        FileVersionInfo.GetVersionInfo(GetSourceExecutable()).ProductVersion,
+        File.Exists(_paths.InstalledExecutable));
+
+    public async Task InstallOrUpdateAsync(CancellationToken cancellationToken)
     {
         ValidateSource();
-        var sourceExecutable = GetSourceExecutable();
+        var versions = GetVersions();
+        if (versions.Action is ClientUpdateAction.Downgrade or ClientUpdateAction.Unknown)
+            throw new InvalidOperationException("无法更新：请使用具有有效版本号且与已安装版本相同或更新的发布文件。");
         WindowsServiceSecurity.EnsureInstallDirectory(_paths.InstallDirectory);
         WindowsServiceSecurity.EnsureLocalServiceCanShutdown();
         EnsureEventSource();
+        var originalState = GetState();
+        if (originalState is not (WindowsServiceState.Running or WindowsServiceState.Stopped or WindowsServiceState.NotInstalled))
+            throw new InvalidOperationException("后台服务正在切换状态或已暂停，请等待服务稳定后重试。");
+        await ClientBinaryDeployment.DeployAsync(
+            GetSourceExecutable(), _paths.InstalledExecutable,
+            StopInstalledAsync,
+            async token => { ConfigureService(); await StartAsync(token); },
+            async token =>
+            {
+                if (originalState == WindowsServiceState.Running)
+                    await StartAsync(token);
+                else if (originalState == WindowsServiceState.NotInstalled)
+                    DeleteServiceRegistration();
+            },
+            cancellationToken);
+    }
 
+    private async Task StopInstalledAsync(CancellationToken cancellationToken)
+    {
+        using var manager = OpenManager(ScManagerConnect);
+        using var service = TryOpenService(manager, ServiceName, ServiceQueryStatus | ServiceStop);
+        if (service is not null) await StopAsync(service, cancellationToken);
+    }
+
+    private static void DeleteServiceRegistration()
+    {
+        using var manager = OpenManager(ScManagerConnect);
+        using var service = TryOpenService(manager, ServiceName, ServiceDelete);
+        if (service is not null && !DeleteService(service))
+            throw LastWin32Exception("无法恢复服务注册状态");
+    }
+
+    private void ConfigureService()
+    {
         using var manager = OpenManager(ScManagerConnect | ScManagerCreateService);
-        using var existing = TryOpenService(
-            manager,
-            ServiceName,
-            ServiceQueryStatus | ServiceStart | ServiceStop | ServiceChangeConfig);
-        if (existing is not null)
-        {
-            await StopAsync(existing, cancellationToken);
-        }
-
-        if (!PathsEqual(sourceExecutable, _paths.InstalledExecutable))
-        {
-            var temporary = _paths.InstalledExecutable + ".tmp-" + Guid.NewGuid().ToString("N");
-            try
-            {
-                File.Copy(sourceExecutable, temporary, overwrite: false);
-                File.Move(temporary, _paths.InstalledExecutable, overwrite: true);
-            }
-            finally
-            {
-                if (File.Exists(temporary))
-                {
-                    File.Delete(temporary);
-                }
-            }
-        }
-
+        using var existing = TryOpenService(manager, ServiceName, ServiceChangeConfig | ServiceStart);
         var commandLine = $"\"{_paths.InstalledExecutable}\" --service";
         if (existing is null)
         {

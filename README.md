@@ -125,7 +125,19 @@ Compose 默认使用 `ghcr.io/fishy-stick/wollet:latest`，数据库保存在 `.
 3. 点击“安装并绑定”。客户端会安装为 Windows 后台服务并自动连接服务器。
 4. 返回管理页面；设备显示在线后即可远程控制。
 
-再次运行客户端可以检查服务状态、修复现有安装或卸载服务。客户端配置位于 `%ProgramData%\Wollet`，设备密钥由 Windows DPAPI 保护。
+再次运行客户端可以检查服务状态、更新或修复现有安装，以及卸载服务。客户端配置位于 `%ProgramData%\Wollet`，设备密钥由 Windows DPAPI 保护。
+
+### 更新 Windows 客户端
+
+下载新版单文件客户端，以管理员身份运行。窗口显示已安装版本和当前程序版本：当前程序较新时提供“更新”，版本相同时提供“修复”，较旧或版本无法比较时禁止覆盖。
+
+版本比较支持开发版与候选版，例如 `1.1.0-dev.2 < 1.1.0-dev.10 < 1.1.0-rc.1 < 1.1.0`；`+` 后的构建信息不影响排序。
+
+检测到本地绑定配置后，点击“更新”或“修复”即可保留原配对，无需填写 Token。更新不依赖服务端在线验证；后台服务启动后会尝试重新连接。凭据已失效时仍需通过“绑定／更换服务端”使用新 Token 绑定。
+
+更新先暂存程序，再停止服务并替换文件。失败时会尝试恢复原程序及服务运行状态；恢复未完成时，错误提示会给出后续修复方式。更新过程中请等待操作完成后再关闭窗口。
+
+不要通过卸载来更新：卸载会删除本地设备凭据。
 
 Windows 客户端的绑定、状态检查和后台连接均直连服务端，不使用系统代理或代理环境变量。
 
@@ -212,6 +224,14 @@ dotnet publish clients/windows/Wollet.Client/Wollet.Client.csproj \
 ```
 
 体积较小的 framework-dependent 版本使用 `win-x64-framework-dependent` Publish Profile。
+
+本地测试构建可显式指定预发布版本，每轮测试递增 `dev.N`：
+
+```powershell
+dotnet publish clients/windows/Wollet.Client/Wollet.Client.csproj -p:PublishProfile=win-x64 -p:Version=1.1.0-dev.1
+```
+
+同一测试版本可通过“修复”重新安装。若已经安装 `1.1.0` 正式版，`1.1.0-dev.N` 会被视为旧版并阻止覆盖。本地构建无需打 tag；远端 `v*` tag 会触发现有发布流程，测试 tag 的预发布标记与镜像标签隔离需在发布前另行配置。
 
 ### 测试
 

@@ -14,14 +14,15 @@ internal sealed record StartupInspectionResult(
 
 internal sealed class InstallCoordinator
 {
-    private readonly WindowsCredentialStore _credentialStore;
-    private readonly WindowsServiceInstaller _serviceInstaller;
+    public ClientUpdateVersion GetVersions() => _serviceInstaller.GetVersions();
+    private readonly ICredentialStore _credentialStore;
+    private readonly IClientInstaller _serviceInstaller;
     private readonly IDeviceInfoProvider _deviceInfoProvider;
     private readonly WolletApiClient _apiClient;
 
     public InstallCoordinator(
-        WindowsCredentialStore credentialStore,
-        WindowsServiceInstaller serviceInstaller,
+        ICredentialStore credentialStore,
+        IClientInstaller serviceInstaller,
         IDeviceInfoProvider deviceInfoProvider,
         WolletApiClient apiClient)
     {
@@ -69,7 +70,7 @@ internal sealed class InstallCoordinator
         {
             var configurationHint = credentials is null
                 ? string.Empty
-                : "；检测到现有绑定配置，可点击“安装并绑定”修复";
+                : "；检测到现有绑定配置，可点击“更新／修复”保留配对并更新程序";
             return new StartupInspectionResult(
                 credentials,
                 DescribeServiceState(serviceState) + configurationHint + "。",
@@ -172,6 +173,7 @@ internal sealed class InstallCoordinator
         CancellationToken cancellationToken)
     {
         var server = ServerAddress.Normalize(serverValue);
+        EnsureVersionCanBeInstalled();
         progress.Report("正在验证安装程序…");
         _serviceInstaller.ValidateSource();
         progress.Report("正在检查现有配置…");
@@ -221,10 +223,32 @@ internal sealed class InstallCoordinator
             await _credentialStore.SaveAsync(credentials, cancellationToken);
         }
 
-        progress.Report("正在准备 Windows Service…");
-        await _serviceInstaller.PrepareAsync(cancellationToken);
-        progress.Report("正在启动 Windows Service…");
-        await _serviceInstaller.StartAsync(cancellationToken);
+        progress.Report("正在安装程序并启动 Windows Service…");
+        await _serviceInstaller.InstallOrUpdateAsync(cancellationToken);
         return new InstallationResult(credentials.DeviceId, reusedCredentials);
+    }
+
+    public async Task<InstallationResult> UpdateAsync(
+        IProgress<string> progress,
+        CancellationToken cancellationToken)
+    {
+        EnsureVersionCanBeInstalled();
+        _serviceInstaller.ValidateSource();
+        var credentials = await _credentialStore.TryLoadAsync(cancellationToken)
+            ?? throw new InvalidOperationException("本地绑定配置缺失，请先使用 Token 安装并绑定。");
+
+        // Updating the executable must not depend on network availability or rewrite credentials.
+        progress.Report("正在更新程序并恢复后台服务，保留现有配对…");
+        await _serviceInstaller.InstallOrUpdateAsync(cancellationToken);
+        return new InstallationResult(credentials.DeviceId, ReusedCredentials: true);
+    }
+
+    private void EnsureVersionCanBeInstalled()
+    {
+        var versions = GetVersions();
+        if (versions.Action == ClientUpdateAction.Downgrade)
+            throw new InvalidOperationException("已安装的客户端版本更高，请运行相同或更新版本的客户端。");
+        if (versions.Action == ClientUpdateAction.Unknown)
+            throw new InvalidOperationException("无法比较客户端版本，请使用具有有效版本号的发布文件；现有安装保持不变。");
     }
 }

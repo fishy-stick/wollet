@@ -8,6 +8,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../Wollet.Client/InstallCoordinator.cs" Link="InstallCoordinator.cs" />
+    <Compile Include="../Wollet.Client/InstallationServices.cs" Link="InstallationServices.cs" />
     <ProjectReference Include="../Wollet.Client.Core/Wollet.Client.Core.csproj" />
   </ItemGroup>
 </Project>

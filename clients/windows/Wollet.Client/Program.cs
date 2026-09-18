@@ -19,6 +19,15 @@ internal static class Program
         }
 
         ApplicationConfiguration.Initialize();
+        using var installerMutex = new Mutex(false, @"Global\Wollet.Client.Installer");
+        bool ownsMutex;
+        try { ownsMutex = installerMutex.WaitOne(0); }
+        catch (AbandonedMutexException) { ownsMutex = true; }
+        if (!ownsMutex)
+        {
+            MessageBox.Show("已有客户端管理窗口正在运行，请关闭后重试。", "Wollet", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
         var paths = new WindowsPaths();
         var credentialStore = new WindowsCredentialStore(paths);
         var deviceInfoProvider = new RouteDeviceInfoProvider();
@@ -32,7 +41,8 @@ internal static class Program
             new WindowsServiceInstaller(paths),
             deviceInfoProvider,
             new WolletApiClient(httpClient));
-        Application.Run(new InstallerForm(coordinator));
+        try { Application.Run(new InstallerForm(coordinator)); }
+        finally { installerMutex.ReleaseMutex(); }
     }
 
     private static async Task RunServiceAsync(string[] args)

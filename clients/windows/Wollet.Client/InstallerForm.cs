@@ -10,8 +10,13 @@ internal sealed class InstallerForm : Form
     private readonly TextBox _serverTextBox = new();
     private readonly TextBox _tokenTextBox = new();
     private readonly Button _installButton = new();
+    private readonly Button _updateButton = new();
+    private readonly Label _introduction = new();
     private readonly Button _uninstallButton = new();
     private readonly Label _statusLabel = new();
+    private bool _busy;
+    private bool _canUpdate;
+    private bool _canInstall;
 
     public InstallerForm(InstallCoordinator coordinator)
     {
@@ -30,6 +35,7 @@ internal sealed class InstallerForm : Form
         ResumeLayout(performLayout: true);
         Shown += OnShown;
         FormClosed += (_, _) => _lifetime.Cancel();
+        FormClosing += (_, args) => { if (_busy) args.Cancel = true; };
     }
 
     private void BuildLayout()
@@ -54,15 +60,12 @@ internal sealed class InstallerForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        var introduction = new Label
-        {
-            AutoSize = true,
-            Dock = DockStyle.Fill,
-            Text = "将此电脑绑定到 Wollet，并安装后台服务。",
-            Margin = new Padding(0, 0, 0, 18),
-        };
-        layout.Controls.Add(introduction, 0, 0);
-        layout.SetColumnSpan(introduction, 2);
+        _introduction.AutoSize = true;
+        _introduction.Dock = DockStyle.Fill;
+        _introduction.Text = "正在检查客户端版本与绑定配置…";
+        _introduction.Margin = new Padding(0, 0, 0, 18);
+        layout.Controls.Add(_introduction, 0, 0);
+        layout.SetColumnSpan(_introduction, 2);
 
         layout.Controls.Add(CreateFieldLabel("服务端地址"), 0, 1);
         _serverTextBox.Anchor = AnchorStyles.Left | AnchorStyles.Right;
@@ -86,6 +89,12 @@ internal sealed class InstallerForm : Form
         _installButton.Padding = new Padding(12, 4, 12, 4);
         _installButton.Click += InstallButtonOnClick;
 
+        _updateButton.AutoSize = true;
+        _updateButton.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        _updateButton.Text = "更新";
+        _updateButton.Padding = new Padding(12, 4, 12, 4);
+        _updateButton.Click += UpdateButtonOnClick;
+
         _uninstallButton.AutoSize = true;
         _uninstallButton.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         _uninstallButton.TabIndex = 1;
@@ -103,6 +112,7 @@ internal sealed class InstallerForm : Form
             Margin = Padding.Empty,
             TabIndex = 2,
         };
+        actions.Controls.Add(_updateButton);
         actions.Controls.Add(_installButton);
         actions.Controls.Add(_uninstallButton);
         layout.Controls.Add(actions, 0, 3);
@@ -132,7 +142,7 @@ internal sealed class InstallerForm : Form
 
     private async void OnShown(object? sender, EventArgs eventArgs)
     {
-        _installButton.Select();
+        SetBusy(true);
         SetStatus("正在检查后台服务状态…", isError: false);
         try
         {
@@ -141,6 +151,8 @@ internal sealed class InstallerForm : Form
             {
                 _serverTextBox.Text = inspection.Credentials.Server.AbsoluteUri.TrimEnd('/');
             }
+
+            RefreshVersionState(inspection.Credentials is not null);
 
             SetStatus(inspection.Message, inspection.IsError, inspection.IsSuccess);
         }
@@ -151,6 +163,41 @@ internal sealed class InstallerForm : Form
         {
             SetStatus("后台服务状态检查失败：" + exception.Message, isError: true);
         }
+        finally { if (!IsDisposed) SetBusy(false); }
+    }
+
+    private void RefreshVersionState(bool hasCredentials)
+    {
+        var versions = _coordinator.GetVersions();
+        _canInstall = versions.Action is not (ClientUpdateAction.Downgrade or ClientUpdateAction.Unknown);
+        _canUpdate = hasCredentials && _canInstall;
+        _updateButton.Visible = hasCredentials;
+        _updateButton.Text = versions.Action == ClientUpdateAction.Repair ? "修复" : "更新";
+        _installButton.Text = hasCredentials ? "绑定／更换服务端" : "安装并绑定";
+        _tokenTextBox.PlaceholderText = hasCredentials ? "更新／修复无需填写 Token" : "首次绑定请输入网页端生成的 Token";
+        var hint = versions.Action switch
+        {
+            ClientUpdateAction.Downgrade => "已安装更高版本，请运行相同或更新版本的客户端。",
+            ClientUpdateAction.Unknown => "版本信息无法比较，请使用具有有效版本号的发布文件。",
+            _ when hasCredentials => "更新／修复会保留现有配对，无需填写 Token。",
+            _ => "填入服务端地址和 Token，安装并绑定此电脑。",
+        };
+        _introduction.Text = $"已安装：{(versions.IsInstalled ? versions.Installed ?? "未知" : "未安装")}    当前程序：{versions.Available ?? "未知"}" + Environment.NewLine + hint;
+        AcceptButton = _canUpdate ? _updateButton : _installButton;
+    }
+
+    private async void UpdateButtonOnClick(object? sender, EventArgs eventArgs)
+    {
+        SetBusy(true);
+        try
+        {
+            var progress = new ControlProgress(this, message => SetStatus(message, isError: false));
+            await _coordinator.UpdateAsync(progress, _lifetime.Token);
+            RefreshVersionState(hasCredentials: true);
+            SetStatus("程序已更新／修复，后台服务已启动，现有配对保持不变；连接状态请在管理页面确认。", false, true);
+        }
+        catch (Exception exception) { ShowError(exception.Message); }
+        finally { if (!IsDisposed) SetBusy(false); }
     }
 
     private async void InstallButtonOnClick(object? sender, EventArgs eventArgs)
@@ -165,6 +212,7 @@ internal sealed class InstallerForm : Form
                 progress,
                 _lifetime.Token);
             _tokenTextBox.Clear();
+            RefreshVersionState(hasCredentials: true);
             SetStatus(
                 result.ReusedCredentials
                     ? "服务已修复并启动，现有设备凭据保持不变。"
@@ -211,6 +259,7 @@ internal sealed class InstallerForm : Form
             var result = await _coordinator.UninstallAsync(progress, _lifetime.Token);
             _serverTextBox.Clear();
             _tokenTextBox.Clear();
+            RefreshVersionState(hasCredentials: false);
             var message = result.RebootRequired
                 ? "客户端已卸载；已安装程序将在 Windows 重启后完成删除。"
                 : "客户端、Windows Service 和本地凭据已卸载。";
@@ -240,9 +289,11 @@ internal sealed class InstallerForm : Form
 
     private void SetBusy(bool busy)
     {
+        _busy = busy;
         _serverTextBox.Enabled = !busy;
         _tokenTextBox.Enabled = !busy;
-        _installButton.Enabled = !busy;
+        _installButton.Enabled = !busy && _canInstall;
+        _updateButton.Enabled = !busy && _canUpdate;
         _uninstallButton.Enabled = !busy;
         UseWaitCursor = busy;
     }

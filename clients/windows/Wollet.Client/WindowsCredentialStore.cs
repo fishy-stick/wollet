@@ -6,7 +6,7 @@ using Wollet.Client.Core;
 
 namespace Wollet.Client;
 
-internal sealed class WindowsCredentialStore
+internal sealed class WindowsCredentialStore : ICredentialStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
