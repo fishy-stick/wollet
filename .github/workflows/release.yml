@@ -14,8 +14,31 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  release-info:
+    name: Validate release version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: Parse tag
+        id: version
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          if (-not $tag.StartsWith('v')) { throw "Release tag must start with v" }
+          $version = $tag.Substring(1)
+          if ($version -notmatch '\A\d+\.\d+\.\d+(?:[-+]|\z)') { throw "Release tag must include major.minor.patch" }
+          $parsed = [System.Management.Automation.SemanticVersion]::Parse($version)
+          $prerelease = -not [string]::IsNullOrEmpty($parsed.PreReleaseLabel)
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "prerelease=$($prerelease.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
   publish-image:
     name: Publish Docker image
+    needs: release-info
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -40,11 +63,12 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: latest=${{ needs.release-info.outputs.prerelease == 'false' }}
           tags: |
             type=ref,event=tag
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ needs.release-info.outputs.prerelease == 'false' }}
+            type=semver,pattern={{major}},enable=${{ needs.release-info.outputs.prerelease == 'false' }}
 
       - name: Build and push image
         uses: docker/build-push-action@v7
@@ -61,6 +85,7 @@ jobs:
 
   build-windows-client:
     name: Build Windows clients
+    needs: release-info
     runs-on: windows-latest
     permissions:
       contents: read
@@ -83,24 +108,17 @@ jobs:
       - name: Test
         run: dotnet test --project clients/windows/Wollet.Client.Core.Tests/Wollet.Client.Core.Tests.csproj --configuration Release --no-restore
 
-      - name: Read release version
-        id: version
-        shell: pwsh
-        run: |
-          $version = "${{ github.ref_name }}" -replace '^v', ''
-          "value=$version" >> $env:GITHUB_OUTPUT
-
       - name: Publish client with .NET Runtime
         run: >-
           dotnet publish clients/windows/Wollet.Client/Wollet.Client.csproj
           -p:PublishProfile=win-x64
-          -p:Version=${{ steps.version.outputs.value }}
+          -p:Version=${{ needs.release-info.outputs.version }}
 
       - name: Publish framework-dependent client
         run: >-
           dotnet publish clients/windows/Wollet.Client/Wollet.Client.csproj
           -p:PublishProfile=win-x64-framework-dependent
-          -p:Version=${{ steps.version.outputs.value }}
+          -p:Version=${{ needs.release-info.outputs.version }}
 
       - name: Prepare release assets
         shell: pwsh
@@ -133,6 +151,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs:
+      - release-info
       - publish-image
       - build-windows-client
     runs-on: ubuntu-latest
@@ -147,9 +166,11 @@ jobs:
           path: dist
 
       - name: Create release
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          IS_PRERELEASE: ${{ needs.release-info.outputs.prerelease }}
           RELEASE_NOTES: |
             ## Windows 客户端
 
@@ -164,9 +185,17 @@ jobs:
             ```console
             docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
             ```
-        run: >-
-          gh release create "${GITHUB_REF_NAME}" dist/*.exe
-          --verify-tag
-          --title "Wollet ${GITHUB_REF_NAME}"
-          --generate-notes
-          --notes "${RELEASE_NOTES}"
+        run: |
+          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          Set-Content -LiteralPath $notesPath -Value $env:RELEASE_NOTES -Encoding utf8
+          $assets = @(Get-ChildItem -LiteralPath dist -Filter '*.exe' -File | ForEach-Object FullName)
+          if ($assets.Count -ne 2) { throw "Expected two Windows release assets" }
+          $releaseArgs = @('release', 'create', $env:GITHUB_REF_NAME) + $assets + @(
+            '--verify-tag', '--title', "Wollet $env:GITHUB_REF_NAME",
+            '--generate-notes', '--notes-file', $notesPath
+          )
+          if ($env:IS_PRERELEASE -eq 'true') {
+            $releaseArgs += @('--prerelease', '--latest=false')
+          }
+          & gh @releaseArgs
+          if ($LASTEXITCODE -ne 0) { throw "GitHub release creation failed" }

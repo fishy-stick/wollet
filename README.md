@@ -241,7 +241,34 @@ dotnet publish clients/windows/Wollet.Client/Wollet.Client.csproj \
 dotnet publish clients/windows/Wollet.Client/Wollet.Client.csproj -p:PublishProfile=win-x64 -p:Version=1.1.0-dev.1
 ```
 
-同一测试版本可通过“修复”重新安装。若已经安装 `1.1.0` 正式版，`1.1.0-dev.N` 会被视为旧版并阻止覆盖。本地构建无需打 tag；远端 `v*` tag 会触发现有发布流程，测试 tag 的预发布标记与镜像标签隔离需在发布前另行配置。
+同一测试版本可通过“修复”重新安装。若已经安装 `1.1.0` 正式版，`1.1.0-dev.N` 会被视为旧版并阻止覆盖。本地构建无需打 tag。
+
+### 发布与部署测试版
+
+提交需要测试的代码后，在该提交上创建并推送递增的测试 tag，例如：
+
+```sh
+git tag v1.1.0-dev.3
+git push origin v1.1.0-dev.3
+```
+
+`Release` 工作流先校验 tag 的语义版本，再构建 Linux amd64／arm64 镜像和两种 Windows 客户端。带预发布标识的 tag（如 `dev.N`、`rc.N`）创建 GitHub Pre-release，不标为 Latest；镜像仅发布完整版本标签，例如 `v1.1.0-dev.3` 和 `1.1.0-dev.3`，不更新 `latest`、`1` 或 `1.1`。正式 tag（如 `v1.1.0`）沿用正式发布流程。
+
+等待 `Publish Docker image` 成功后，在服务端部署目录的 `.env` 中指定测试镜像：
+
+```dotenv
+WOLLET_IMAGE=ghcr.io/fishy-stick/wollet:v1.1.0-dev.3
+```
+
+然后执行：
+
+```sh
+docker compose pull wollet
+docker compose up -d wollet
+docker compose logs -f wollet
+```
+
+Windows 客户端可在对应的 GitHub Pre-release 附件中下载。下一轮测试使用新的 `dev.N` tag，并同步更新部署镜像版本；发布前还需核对功能目录中的版本映射。
 
 ### 测试
 
