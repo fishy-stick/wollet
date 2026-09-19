@@ -1,6 +1,6 @@
 # Wollet v1 服务端协议
 
-本文描述当前已实现的协议。`v1.1.0` 的计划扩展见 [同步关机协议设计草案](design/shutdown-plan-protocol.md)，尚未实现。
+本文描述基础协议。当前开发分支已实现 `v1.1.0` 的能力协商扩展，消息、管理 API 和状态语义见 [同步关机协议](design/shutdown-plan-protocol.md)；未协商该能力的连接继续使用本文的基础关机流程。
 
 所有 JSON 时间均为 UTC RFC 3339。REST 错误统一为：
 

@@ -10,7 +10,7 @@ using Wollet.Client.Core;
 namespace Wollet.Client.Core.Tests;
 
 [TestClass]
-public sealed class CoreTests
+public sealed partial class CoreTests
 {
     [TestMethod]
     public void NormalizesServerAddresses()

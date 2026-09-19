@@ -124,9 +124,36 @@ func (s *Server) handleClientConnect(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close(websocket.StatusInternalError, "cannot update device")
 		return
 	}
+	var planConn *planConnection
+	for _, capability := range hello.Capabilities {
+		if capability == protocol.ShutdownPlanCapability {
+			session, err := identity.NewUUID()
+			if err != nil {
+				return
+			}
+			planConn = &planConnection{socket: conn, session: session}
+			break
+		}
+	}
+	var capabilities []string
+	var sessionID string
+	if planConn != nil {
+		capabilities = []string{protocol.ShutdownPlanCapability}
+		sessionID = planConn.session
+		s.plans.mu.Lock()
+		s.plans.connections[device.ID] = planConn
+		s.plans.mu.Unlock()
+		defer func() {
+			s.plans.mu.Lock()
+			if s.plans.connections[device.ID] == planConn {
+				delete(s.plans.connections, device.ID)
+			}
+			s.plans.mu.Unlock()
+		}()
+	}
 	readyCtx, cancelReady := context.WithTimeout(r.Context(), 5*time.Second)
 	err = wsjson.Write(readyCtx, conn, protocol.ServerMessage{
-		Type: "ready", ProtocolVersion: protocol.Version,
+		Type: "ready", ProtocolVersion: protocol.Version, Capabilities: capabilities, SessionID: sessionID,
 		HeartbeatIntervalSeconds: int(s.cfg.HeartbeatEvery.Seconds()),
 		OfflineAfterSeconds:      int(s.cfg.OfflineAfter.Seconds()),
 	})
@@ -144,6 +171,14 @@ func (s *Server) handleClientConnect(w http.ResponseWriter, r *http.Request) {
 				s.logger.Debug("device WebSocket read failed", "device_id", device.ID, "error", err)
 			}
 			return
+		}
+		if strings.HasPrefix(message.Type, "shutdown_plan_") && planConn != nil {
+			if err := s.receivePlanMessage(device.ID, planConn, message); err != nil {
+				s.logger.Warn("plan message rejected", "error", err)
+				_ = conn.Close(websocket.StatusPolicyViolation, "invalid plan message")
+				return
+			}
+			continue
 		}
 		switch message.Type {
 		case "heartbeat":

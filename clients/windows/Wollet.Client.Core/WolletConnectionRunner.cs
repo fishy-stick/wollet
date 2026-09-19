@@ -16,17 +16,20 @@ public sealed class WolletConnectionRunner
     private readonly IShutdownController _shutdownController;
     private readonly IClientLog _log;
     private readonly TimeProvider _timeProvider;
+    private readonly ShutdownPlanEngine? _plans;
+    private long _sequence;
 
     public WolletConnectionRunner(
         IDeviceInfoProvider deviceInfoProvider,
         IShutdownController shutdownController,
         IClientLog? log = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null, ShutdownPlanEngine? plans = null)
     {
         _deviceInfoProvider = deviceInfoProvider;
         _shutdownController = shutdownController;
         _log = log ?? NullClientLog.Instance;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _plans = plans;
     }
 
     public async Task RunAsync(ClientCredentials credentials, CancellationToken cancellationToken)
@@ -94,6 +97,7 @@ public sealed class WolletConnectionRunner
                 ProtocolVersion = ProtocolVersion.Current,
                 DeviceName = identity.Name,
                 MacAddress = identity.MacAddress,
+                Capabilities = _plans is null ? null : ["shutdown-plan.v1"],
             },
             cancellationToken);
 
@@ -107,14 +111,35 @@ public sealed class WolletConnectionRunner
             throw new ClientProtocolException("服务端返回了不支持的 ready 消息");
         }
 
+        var supportsPlans = _plans is not null && ready.Capabilities?.Contains("shutdown-plan.v1") == true;
+        if (supportsPlans)
+        {
+            if (!Guid.TryParse(ready.SessionId, out _)) throw new ClientProtocolException("计划会话无效");
+            var syncAcknowledgements = ReadSyncAcknowledgementsAsync(socket, ready.SessionId!, readyCancellation.Token);
+            var journal = await _plans!.JournalAsync(cancellationToken);
+            await SendAsync(socket, writeLock, new ClientMessage { Type = "shutdown_plan_sync", SessionId = ready.SessionId,
+                Plan = journal.Plan }, cancellationToken);
+            foreach (var plan in journal.Plans!.Values.Where(p => p.OperationId != journal.Plan?.OperationId))
+                await SendAsync(socket, writeLock, new ClientMessage { Type = "shutdown_plan_sync", SessionId = ready.SessionId,
+                    Plan = plan }, cancellationToken);
+            foreach (var result in journal.Results.Values)
+                await SendAsync(socket, writeLock, new ClientMessage { Type = "shutdown_plan_sync", SessionId = ready.SessionId,
+                    Sequence = Interlocked.Increment(ref _sequence), Result = result }, cancellationToken);
+            await SendAsync(socket, writeLock, new ClientMessage { Type = "shutdown_plan_sync", SessionId = ready.SessionId,
+                Plan = await _plans.SnapshotAsync(cancellationToken), Complete = true }, cancellationToken);
+            await syncAcknowledgements;
+        }
+        else if (_plans is not null) await _plans.CancelLocalAsync("protocol_downgrade", cancellationToken);
         var heartbeatInterval = TimeSpan.FromSeconds(ready.HeartbeatIntervalSeconds);
         onReady();
         _log.Information($"设备已连接，心跳间隔 {heartbeatInterval.TotalSeconds:0} 秒");
 
         using var sessionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var heartbeatTask = SendHeartbeatsAsync(socket, writeLock, heartbeatInterval, sessionCancellation.Token);
-        var commandTask = ReceiveCommandsAsync(socket, writeLock, sessionCancellation.Token);
-        var completed = await Task.WhenAny(heartbeatTask, commandTask);
+        var commandTask = ReceiveCommandsAsync(socket, writeLock, supportsPlans ? ready.SessionId : null, sessionCancellation.Token);
+        var stateTask = supportsPlans ? SendPlanStatesAsync(socket, writeLock, ready.SessionId!, sessionCancellation.Token)
+            : Task.Delay(Timeout.Infinite, sessionCancellation.Token);
+        var completed = await Task.WhenAny(heartbeatTask, commandTask, stateTask);
         sessionCancellation.Cancel();
         var remaining = completed == commandTask ? heartbeatTask : commandTask;
         try
@@ -129,12 +154,13 @@ public sealed class WolletConnectionRunner
             }
             else
             {
-                await heartbeatTask;
+                await completed;
             }
         }
         finally
         {
             await ObserveCompletionAsync(remaining);
+            await ObserveCompletionAsync(stateTask);
         }
 
         throw new IOException("WebSocket 连接意外结束");
@@ -143,12 +169,25 @@ public sealed class WolletConnectionRunner
     private async Task<bool> ReceiveCommandsAsync(
         ClientWebSocket socket,
         SemaphoreSlim writeLock,
+        string? planSession,
         CancellationToken cancellationToken)
     {
         while (true)
         {
             var message = await ReceiveAsync(socket, cancellationToken);
-            if (message.Type != "shutdown" || string.IsNullOrWhiteSpace(message.CommandId))
+            if (planSession is not null)
+            {
+                if (message.SessionId != planSession) throw new ClientProtocolException("计划会话不匹配");
+                if (message.Type is "shutdown_plan_synced" or "shutdown_plan_recorded") continue;
+                if (message.Type is not ("shutdown_plan_create" or "shutdown_plan_cancel" or "shutdown_plan_execute"))
+                    throw new ClientProtocolException("不支持的计划消息");
+                var result = await _plans!.ApplyAsync(new(message.Type, message.CommandId ?? "", message.OperationId ?? "",
+                    message.ExpectedRevision, message.DelaySeconds), cancellationToken);
+                await SendAsync(socket, writeLock, new ClientMessage { Type = "shutdown_plan_result", SessionId = planSession,
+                    Sequence = Interlocked.Increment(ref _sequence), CommandId = result.CommandId, OperationId = result.OperationId,
+                    Accepted = result.Accepted, Code = result.Code, Plan = result.Plan }, cancellationToken);
+                continue;
+            }            if (message.Type != "shutdown" || string.IsNullOrWhiteSpace(message.CommandId))
             {
                 throw new ClientProtocolException("服务端发送了不支持的消息");
             }
@@ -164,6 +203,23 @@ public sealed class WolletConnectionRunner
         }
     }
 
+    private async Task SendPlanStatesAsync(ClientWebSocket socket, SemaphoreSlim writeLock, string session, CancellationToken token)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        while (await timer.WaitForNextTickAsync(token))
+            await SendAsync(socket, writeLock, new ClientMessage { Type = "shutdown_plan_state", SessionId = session,
+                Sequence = Interlocked.Increment(ref _sequence), Plan = await _plans!.SnapshotAsync(token) }, token);
+    }
+    private static async Task ReadSyncAcknowledgementsAsync(ClientWebSocket socket, string session, CancellationToken token)
+    {
+        while (true)
+        {
+            var acknowledgement = await ReceiveAsync(socket, token);
+            if (acknowledgement.SessionId != session) throw new ClientProtocolException("同步会话无效");
+            if (acknowledgement.Type == "shutdown_plan_synced") return;
+            if (acknowledgement.Type != "shutdown_plan_recorded") throw new ClientProtocolException("同步回执无效");
+        }
+    }
     private async Task SendHeartbeatsAsync(
         ClientWebSocket socket,
         SemaphoreSlim writeLock,
@@ -181,17 +237,19 @@ public sealed class WolletConnectionRunner
         }
     }
 
-    private static async Task SendAsync(
+    private async Task SendAsync(
         ClientWebSocket socket,
         SemaphoreSlim writeLock,
         ClientMessage message,
         CancellationToken cancellationToken)
     {
-        var payload = JsonSerializer.SerializeToUtf8Bytes(message, JsonOptions);
+
         using var operationCancellation = CreateTimeout(cancellationToken, OperationTimeout);
         await writeLock.WaitAsync(operationCancellation.Token);
         try
         {
+            if (message.SessionId is not null) message = message with { Sequence = Interlocked.Increment(ref _sequence) };
+            var payload = JsonSerializer.SerializeToUtf8Bytes(message, JsonOptions);
             await socket.SendAsync(
                 payload,
                 WebSocketMessageType.Text,

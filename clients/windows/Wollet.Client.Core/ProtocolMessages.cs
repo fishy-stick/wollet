@@ -42,6 +42,20 @@ internal sealed record ClientMessage
     [JsonPropertyName("commandId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CommandId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? Capabilities { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SessionId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OperationId { get; init; }
+    public long ExpectedRevision { get; init; }
+    public int DelaySeconds { get; init; }
+    public long Sequence { get; init; }
+    public bool Complete { get; init; }
+    public bool Accepted { get; init; }
+    public string? Code { get; init; }
+    public ShutdownPlan? Plan { get; init; }
+    public ShutdownResult? Result { get; init; }
 }
 
 internal sealed record ServerMessage
@@ -60,4 +74,18 @@ internal sealed record ServerMessage
 
     [JsonPropertyName("commandId")]
     public string? CommandId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? Capabilities { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SessionId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OperationId { get; init; }
+    public long ExpectedRevision { get; init; }
+    public int DelaySeconds { get; init; }
+    public long Sequence { get; init; }
+    public bool Complete { get; init; }
+    public bool Accepted { get; init; }
+    public string? Code { get; init; }
+    public ShutdownPlan? Plan { get; init; }
+    public ShutdownResult? Result { get; init; }
 }

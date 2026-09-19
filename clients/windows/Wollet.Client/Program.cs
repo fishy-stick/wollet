@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Security.Principal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.WindowsServices;
@@ -19,6 +21,26 @@ internal static class Program
         }
 
         ApplicationConfiguration.Initialize();
+        if (args.Contains("--desktop", StringComparer.OrdinalIgnoreCase))
+        {
+            using var desktopMutex = DesktopLifetime.Acquire(out var first);
+            if (first) Application.Run(new DesktopPlanContext());
+            return;
+        }
+        using var identity = WindowsIdentity.GetCurrent();
+        if (!new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator))
+        {
+            try
+            {
+                using var elevated = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "--elevated-installer") { UseShellExecute = true, Verb = "runas" });
+                // Keep the unelevated launcher alive so a completed installation can start
+                // its desktop companion without inheriting the administrator token.
+                while (elevated is not null && !elevated.WaitForExit(1000)) TryStartDesktop();
+                TryStartDesktop();
+            }
+            catch (System.ComponentModel.Win32Exception) { MessageBox.Show("安装和管理客户端需要管理员权限。", "Wollet"); }
+            return;
+        }
         using var installerMutex = new Mutex(false, @"Global\Wollet.Client.Installer");
         bool ownsMutex;
         try { ownsMutex = installerMutex.WaitOne(0); }
@@ -43,6 +65,17 @@ internal static class Program
             new WolletApiClient(httpClient));
         try { Application.Run(new InstallerForm(coordinator)); }
         finally { installerMutex.ReleaseMutex(); }
+        if (!args.Contains("--elevated-installer", StringComparer.OrdinalIgnoreCase)) TryStartDesktop();
+    }
+
+    private static void TryStartDesktop()
+    {
+        var paths = new WindowsPaths();
+        if (!File.Exists(paths.InstalledExecutable) || File.Exists(Path.Combine(paths.InstallDirectory, "desktop.stop"))) return;
+        using var run = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run");
+        if (run?.GetValue("WolletDesktop") is null) return;
+        if (Mutex.TryOpenExisting(DesktopLifetime.MutexName(Process.GetCurrentProcess().SessionId), out var existing)) { existing.Dispose(); return; }
+        using var desktop = Process.Start(new ProcessStartInfo(paths.InstalledExecutable, "--desktop") { UseShellExecute = false });
     }
 
     private static async Task RunServiceAsync(string[] args)

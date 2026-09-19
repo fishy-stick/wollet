@@ -30,6 +30,7 @@ type WOLSender interface {
 }
 
 type Server struct {
+	plans         *shutdownPlans
 	cfg           config.Config
 	store         *store.Store
 	logger        *slog.Logger
@@ -51,6 +52,7 @@ func New(cfg config.Config, dataStore *store.Store, sender WOLSender, logger *sl
 	adminPasswordHash := sha256.Sum256([]byte(cfg.AdminPassword))
 	cfg.AdminPassword = ""
 	server := &Server{
+		plans:         newShutdownPlans(),
 		cfg:           cfg,
 		store:         dataStore,
 		logger:        logger,
@@ -71,6 +73,9 @@ func New(cfg config.Config, dataStore *store.Store, sender WOLSender, logger *sl
 }
 
 func (s *Server) routes() {
+	s.mux.HandleFunc("POST /api/v1/devices/{id}/shutdown-plans", s.requireSameOrigin(s.requireAdmin(s.handleShutdownPlan)))
+	s.mux.HandleFunc("GET /api/v1/devices/{id}/shutdown-plans/{operationId}", s.requireAdmin(s.handleShutdownPlan))
+	s.mux.HandleFunc("POST /api/v1/devices/{id}/shutdown-plans/{operationId}/{action}", s.requireSameOrigin(s.requireAdmin(s.handleShutdownPlan)))
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("GET /readyz", s.handleReady)
 

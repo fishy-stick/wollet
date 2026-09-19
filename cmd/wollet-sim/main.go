@@ -120,6 +120,8 @@ func runSimulator(args []string) error {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	configPath := flags.String("config", "wollet-sim.json", "simulator config file")
 	exitOnShutdown := flags.Bool("exit-on-shutdown", true, "exit after acknowledging shutdown")
+	planMode := flags.Bool("shutdown-plans", true, "enable client-managed countdown (false tests legacy protocol)")
+	localCancelAfter := flags.Duration("local-cancel-after", 0, "simulate local cancellation after this duration")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -138,8 +140,17 @@ func runSimulator(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	delay := time.Second
+	var plans *simulatedPlans
+	if *planMode {
+		plans = &simulatedPlans{localCancelAfter: *localCancelAfter}
+	}
 	for {
-		err := connect(ctx, config, *exitOnShutdown)
+		if plans != nil && *exitOnShutdown {
+			if p := plans.snapshot(); p != nil && p.State == "submitted" {
+				return nil
+			}
+		}
+		err := connect(ctx, config, *exitOnShutdown, plans)
 		if errors.Is(err, errShutdownReceived) || errors.Is(err, context.Canceled) {
 			return nil
 		}
@@ -158,7 +169,7 @@ func runSimulator(args []string) error {
 	}
 }
 
-func connect(ctx context.Context, config simulatorConfig, exitOnShutdown bool) error {
+func connect(ctx context.Context, config simulatorConfig, exitOnShutdown bool, plans *simulatedPlans) error {
 	endpoint, err := url.Parse(config.Server)
 	if err != nil {
 		return err
@@ -187,16 +198,26 @@ func connect(ctx context.Context, config simulatorConfig, exitOnShutdown bool) e
 	conn.SetReadLimit(4 << 10)
 
 	var writeMu sync.Mutex
+	var sequence int64
 	write := func(message protocol.ClientMessage) error {
 		writeMu.Lock()
 		defer writeMu.Unlock()
+		if message.SessionID != "" {
+			sequence++
+			message.Sequence = sequence
+		}
 		writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		return wsjson.Write(writeCtx, conn, message)
 	}
+	var capabilities []string
+	if plans != nil {
+		capabilities = []string{protocol.ShutdownPlanCapability}
+	}
 	if err := write(protocol.ClientMessage{
 		Type: "hello", ProtocolVersion: protocol.Version,
-		DeviceName: config.DeviceName, MACAddress: config.MACAddress,
+		Capabilities: capabilities,
+		DeviceName:   config.DeviceName, MACAddress: config.MACAddress,
 	}); err != nil {
 		return err
 	}
@@ -207,12 +228,45 @@ func connect(ctx context.Context, config simulatorConfig, exitOnShutdown bool) e
 	if ready.Type != "ready" || ready.ProtocolVersion != protocol.Version {
 		return errors.New("server returned an unsupported ready message")
 	}
+	if plans != nil && ready.SessionID != "" {
+		for _, result := range plans.history() {
+			if err := write(protocol.ClientMessage{Type: "shutdown_plan_sync", SessionID: ready.SessionID, Result: result}); err != nil {
+				return err
+			}
+		}
+		if err := write(protocol.ClientMessage{Type: "shutdown_plan_sync", SessionID: ready.SessionID, Plan: plans.snapshot(), Complete: true}); err != nil {
+			return err
+		}
+	}
 	heartbeatEvery := time.Duration(ready.HeartbeatIntervalSeconds) * time.Second
 	if heartbeatEvery <= 0 {
 		heartbeatEvery = 15 * time.Second
 	}
 	heartbeatsDone := make(chan struct{})
 	defer close(heartbeatsDone)
+	if plans != nil && ready.SessionID != "" {
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-heartbeatsDone:
+					return
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					plan := plans.snapshot()
+					if err := write(protocol.ClientMessage{Type: "shutdown_plan_state", SessionID: ready.SessionID, Plan: plan}); err != nil {
+						return
+					}
+					if exitOnShutdown && plan != nil && plan.State == "submitted" {
+						conn.CloseNow()
+						return
+					}
+				}
+			}
+		}()
+	}
 	go func() {
 		ticker := time.NewTicker(heartbeatEvery)
 		defer ticker.Stop()
@@ -234,6 +288,19 @@ func connect(ctx context.Context, config simulatorConfig, exitOnShutdown bool) e
 		var message protocol.ServerMessage
 		if err := wsjson.Read(ctx, conn, &message); err != nil {
 			return err
+		}
+		if plans != nil && ready.SessionID != "" {
+			if message.SessionID != ready.SessionID {
+				return errors.New("invalid plan session")
+			}
+			if message.Type == "shutdown_plan_synced" || message.Type == "shutdown_plan_recorded" {
+				continue
+			}
+			result := plans.apply(message)
+			if err := write(protocol.ClientMessage{Type: "shutdown_plan_result", SessionID: ready.SessionID, CommandID: result.CommandID, OperationID: result.OperationID, Accepted: result.Accepted, Code: result.Code, Plan: result.Plan}); err != nil {
+				return err
+			}
+			continue
 		}
 		if message.Type != "shutdown" || message.CommandID == "" {
 			return errors.New("server sent an unsupported command")

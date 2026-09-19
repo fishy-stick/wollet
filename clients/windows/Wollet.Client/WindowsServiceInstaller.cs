@@ -96,21 +96,31 @@ internal sealed class WindowsServiceInstaller : IClientInstaller
         WindowsServiceSecurity.EnsureInstallDirectory(_paths.InstallDirectory);
         WindowsServiceSecurity.EnsureLocalServiceCanShutdown();
         EnsureEventSource();
+        WindowsPlanStore.Prepare(_paths);
         var originalState = GetState();
         if (originalState is not (WindowsServiceState.Running or WindowsServiceState.Stopped or WindowsServiceState.NotInstalled))
             throw new InvalidOperationException("后台服务正在切换状态或已暂停，请等待服务稳定后重试。");
-        await ClientBinaryDeployment.DeployAsync(
-            GetSourceExecutable(), _paths.InstalledExecutable,
-            StopInstalledAsync,
-            async token => { ConfigureService(); await StartAsync(token); },
-            async token =>
-            {
-                if (originalState == WindowsServiceState.Running)
-                    await StartAsync(token);
-                else if (originalState == WindowsServiceState.NotInstalled)
-                    DeleteServiceRegistration();
-            },
-            cancellationToken);
+        var marker = Path.Combine(_paths.InstallDirectory, "desktop.stop");
+        await File.WriteAllTextAsync(marker, "update", cancellationToken);
+        try
+        {
+            await DesktopLifetime.WaitForExitAsync(cancellationToken);
+            await ClientBinaryDeployment.DeployAsync(
+                GetSourceExecutable(), _paths.InstalledExecutable,
+                StopInstalledAsync,
+                async token => { ConfigureService(); await StartAsync(token); },
+                async token =>
+                {
+                    if (originalState == WindowsServiceState.Running)
+                        await StartAsync(token);
+                    else if (originalState == WindowsServiceState.NotInstalled)
+                        DeleteServiceRegistration();
+                },
+                cancellationToken);
+            using (var run = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"))
+                run.SetValue("WolletDesktop", $"\"{_paths.InstalledExecutable}\" --desktop");
+        }
+        finally { File.Delete(marker); }
     }
 
     private async Task StopInstalledAsync(CancellationToken cancellationToken)
@@ -221,6 +231,13 @@ internal sealed class WindowsServiceInstaller : IClientInstaller
             }
         }
 
+        using (var run = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", writable: true))
+            run?.DeleteValue("WolletDesktop", throwOnMissingValue: false);
+        if (Directory.Exists(_paths.InstallDirectory))
+        {
+            await File.WriteAllTextAsync(Path.Combine(_paths.InstallDirectory, "desktop.stop"), "uninstall", cancellationToken);
+            await DesktopLifetime.WaitForExitAsync(cancellationToken);
+        }
         RemoveEventSource();
         return DeleteInstalledFiles();
     }

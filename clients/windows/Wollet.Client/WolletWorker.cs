@@ -44,18 +44,48 @@ internal sealed class WolletWorker : BackgroundService
             return;
         }
 
+        var engine = new ShutdownPlanEngine(new WindowsPlanStore(new WindowsPaths()), _shutdownController);
+        try { await engine.InitializeAsync(stoppingToken); }
+        catch (Exception exception) { _logger.LogError(exception, "无法恢复关机计划，暂停连接"); await WaitUntilStoppedAsync(stoppingToken); return; }
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var localServer = new DesktopPlanServer(engine);
+        var localTask = localServer.RunAsync(lifetime.Token);
+        var clockTask = RunPlanClockAsync(engine, lifetime.Token);
         var runner = new WolletConnectionRunner(
             _deviceInfoProvider,
             _shutdownController,
-            new LoggerClientLog(_logger));
+            new LoggerClientLog(_logger), plans: engine);
+        Task? connectionTask = null;
         try
         {
-            await runner.RunAsync(credentials, stoppingToken);
+            connectionTask = runner.RunAsync(credentials, lifetime.Token);
+            var completed = await Task.WhenAny(connectionTask, localTask, clockTask);
+            await completed;
+            if (completed != connectionTask) throw new IOException("本地关机服务意外退出");
         }
         catch (DeviceCredentialsRejectedException exception)
         {
             _logger.LogError(exception, "设备凭据已失效，需要使用新 Token 重新绑定");
+            await engine.CancelLocalAsync("credentials_rejected", CancellationToken.None);
             await WaitUntilStoppedAsync(stoppingToken);
+        }
+        finally
+        {
+            lifetime.Cancel();
+            try { await Task.WhenAll(localTask, clockTask, connectionTask ?? Task.CompletedTask); }
+            catch (Exception exception) { _logger.LogDebug(exception, "关机后台任务已结束"); }
+            finally { await engine.CancelLocalAsync("client_restarted", CancellationToken.None); }
+        }
+    }
+
+    private static async Task RunPlanClockAsync(ShutdownPlanEngine engine, CancellationToken token)
+    {
+        using var power = new PowerResumeMonitor();
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
+        while (await timer.WaitForNextTickAsync(token))
+        {
+            if (power.ConsumeChange()) await engine.CancelLocalAsync("system_resumed", token);
+            await engine.TickAsync(token);
         }
     }
 

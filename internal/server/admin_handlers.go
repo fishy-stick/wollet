@@ -105,21 +105,27 @@ func (s *Server) handleCreatePairingToken(w http.ResponseWriter, r *http.Request
 }
 
 type deviceView struct {
-	ID         string     `json:"id"`
-	Name       string     `json:"name"`
-	MACAddress string     `json:"macAddress"`
-	Status     string     `json:"status"`
-	Operation  string     `json:"operation,omitempty"`
-	LastSeenAt *time.Time `json:"lastSeenAt"`
-	CreatedAt  time.Time  `json:"createdAt"`
+	Capabilities    []string     `json:"capabilities,omitempty"`
+	ShutdownPlan    *planView    `json:"shutdownPlan,omitempty"`
+	ShutdownRequest *planRequest `json:"shutdownRequest,omitempty"`
+	ServerTime      time.Time    `json:"serverTime"`
+	ID              string       `json:"id"`
+	Name            string       `json:"name"`
+	MACAddress      string       `json:"macAddress"`
+	Status          string       `json:"status"`
+	Operation       string       `json:"operation,omitempty"`
+	LastSeenAt      *time.Time   `json:"lastSeenAt"`
+	CreatedAt       time.Time    `json:"createdAt"`
 }
 
 func (s *Server) view(device store.Device) deviceView {
+	caps, plan, request := s.planDeviceView(device.ID)
 	status := "offline"
 	if s.hub.IsOnline(device.ID) {
 		status = "online"
 	}
 	return deviceView{
+		Capabilities: caps, ShutdownPlan: plan, ShutdownRequest: request, ServerTime: time.Now().UTC(),
 		ID: device.ID, Name: device.Name, MACAddress: device.MACAddress,
 		Status: status, Operation: s.operations.get(device.ID),
 		LastSeenAt: device.LastSeenAt, CreatedAt: device.CreatedAt,
