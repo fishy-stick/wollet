@@ -14,6 +14,8 @@ internal sealed class InstallerForm : Form
     private readonly Label _introduction = new();
     private readonly Button _uninstallButton = new();
     private readonly Label _statusLabel = new();
+    private readonly CompatibilityHint _compatibility = new();
+    private readonly LinkLabel _refresh = new() { Text = "刷新状态", AutoSize = true };
     private bool _busy;
     private bool _canUpdate;
     private bool _canInstall;
@@ -27,7 +29,7 @@ internal sealed class InstallerForm : Form
         // All layout dimensions below are authored at 100% (96 DPI).
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(520, 240);
+        ClientSize = new Size(520, 310);
         MinimumSize = SizeFromClientSize(ClientSize);
         AutoScroll = true;
         MaximizeBox = false;
@@ -49,7 +51,7 @@ internal sealed class InstallerForm : Form
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Padding = new Padding(24),
             ColumnCount = 2,
-            RowCount = 5,
+            RowCount = 7,
         };
         layout.SuspendLayout();
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -127,6 +129,12 @@ internal sealed class InstallerForm : Form
         layout.Controls.Add(_statusLabel, 0, 4);
         layout.SetColumnSpan(_statusLabel, 2);
 
+        layout.Controls.Add(_compatibility, 0, 5);
+        layout.SetColumnSpan(_compatibility, 2);
+        _refresh.LinkClicked += (_, _) => OnShown(this, EventArgs.Empty);
+        layout.Controls.Add(_refresh, 0, 6);
+        layout.SetColumnSpan(_refresh, 2);
+
         Controls.Add(layout);
         layout.ResumeLayout(performLayout: true);
         AcceptButton = _installButton;
@@ -155,12 +163,14 @@ internal sealed class InstallerForm : Form
             RefreshVersionState(inspection.Credentials is not null);
 
             SetStatus(inspection.Message, inspection.IsError, inspection.IsSuccess);
+            _compatibility.ShowResult(inspection.Compatibility);
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {
         }
         catch (Exception exception)
         {
+            _compatibility.ShowResult(null);
             SetStatus("后台服务状态检查失败：" + exception.Message, isError: true);
         }
         finally { if (!IsDisposed) SetBusy(false); }
@@ -193,6 +203,7 @@ internal sealed class InstallerForm : Form
         {
             var progress = new ControlProgress(this, message => SetStatus(message, isError: false));
             await _coordinator.UpdateAsync(progress, _lifetime.Token);
+            _compatibility.ShowResult((await _coordinator.InspectAsync(_lifetime.Token)).Compatibility);
             RefreshVersionState(hasCredentials: true);
             SetStatus("程序已更新／修复，后台服务已启动，现有配对保持不变；连接状态请在管理页面确认。", false, true);
         }
@@ -212,6 +223,7 @@ internal sealed class InstallerForm : Form
                 progress,
                 _lifetime.Token);
             _tokenTextBox.Clear();
+            _compatibility.ShowResult((await _coordinator.InspectAsync(_lifetime.Token)).Compatibility);
             RefreshVersionState(hasCredentials: true);
             SetStatus(
                 result.ReusedCredentials
@@ -260,6 +272,7 @@ internal sealed class InstallerForm : Form
             _serverTextBox.Clear();
             _tokenTextBox.Clear();
             RefreshVersionState(hasCredentials: false);
+            _compatibility.ShowResult(null);
             var message = result.RebootRequired
                 ? "客户端已卸载；已安装程序将在 Windows 重启后完成删除。"
                 : "客户端、Windows Service 和本地凭据已卸载。";
@@ -289,6 +302,7 @@ internal sealed class InstallerForm : Form
 
     private void SetBusy(bool busy)
     {
+        _refresh.Enabled = !busy;
         _busy = busy;
         _serverTextBox.Enabled = !busy;
         _tokenTextBox.Enabled = !busy;

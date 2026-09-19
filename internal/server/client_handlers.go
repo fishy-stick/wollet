@@ -9,6 +9,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/fishy-stick/wollet/internal/compatibility"
 	"github.com/fishy-stick/wollet/internal/events"
 	"github.com/fishy-stick/wollet/internal/identity"
 	"github.com/fishy-stick/wollet/internal/protocol"
@@ -153,6 +154,7 @@ func (s *Server) handleClientConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	readyCtx, cancelReady := context.WithTimeout(r.Context(), 5*time.Second)
 	err = wsjson.Write(readyCtx, conn, protocol.ServerMessage{
+		ServerVersion: compatibility.Version, SupportedCapabilities: compatibility.ServerCapabilities(),
 		Type: "ready", ProtocolVersion: protocol.Version, Capabilities: capabilities, SessionID: sessionID,
 		HeartbeatIntervalSeconds: int(s.cfg.HeartbeatEvery.Seconds()),
 		OfflineAfterSeconds:      int(s.cfg.OfflineAfter.Seconds()),
@@ -162,6 +164,10 @@ func (s *Server) handleClientConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.recordPeer(r.Context(), device.ID, conn, hello.ClientVersion, hello.Capabilities); err != nil {
+		return
+	}
+	defer s.forgetPeer(device.ID, conn)
 	connection := s.hub.Register(device.ID, conn, now)
 	defer s.hub.Unregister(connection, time.Now().UTC())
 	for {

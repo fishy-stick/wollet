@@ -3,6 +3,7 @@ package protocol
 const Version = 1
 
 type ClientMessage struct {
+	ClientVersion    string          `json:"clientVersion,omitempty"`
 	Capabilities     []string        `json:"capabilities,omitempty"`
 	SessionID        string          `json:"sessionId,omitempty"`
 	OperationID      string          `json:"operationId,omitempty"`
@@ -22,6 +23,8 @@ type ClientMessage struct {
 }
 
 type ServerMessage struct {
+	ServerVersion            string          `json:"serverVersion,omitempty"`
+	SupportedCapabilities    []string        `json:"supportedCapabilities,omitempty"`
 	Revision                 int64           `json:"revision,omitempty"`
 	Capabilities             []string        `json:"capabilities,omitempty"`
 	SessionID                string          `json:"sessionId,omitempty"`

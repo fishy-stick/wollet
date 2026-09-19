@@ -12,6 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="../../../internal/compatibility/catalog.json" LogicalName="Wollet.FeatureCatalog.json" />
     <PackageReference Include="NuGet.Versioning" Version="7.9.0" />
   </ItemGroup>
 </Project>

@@ -56,6 +56,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   bindInteractions();
+  bindCompatibilityHint();
   bootstrap();
 });
 
@@ -103,6 +104,7 @@ async function bootstrap() {
 }
 
 function showLogin(message = "") {
+  closeCompatibilityHint();
   closeEvents();
   elements.bootView.hidden = true;
   elements.appView.hidden = true;
@@ -113,6 +115,9 @@ function showLogin(message = "") {
 }
 
 async function showApp() {
+  void api("/api/v1/server-info").then(info => {
+    document.querySelector("#server-version").textContent = `服务端 ${info.version === "unknown" ? "版本未知" : info.version}`;
+  }).catch(() => { document.querySelector("#server-version").textContent = "服务端版本未知"; });
   elements.bootView.hidden = true;
   elements.loginView.hidden = true;
   elements.appView.hidden = false;
@@ -270,6 +275,7 @@ function selectedDevice() {
 
 function render() {
   const device = selectedDevice();
+  renderCompatibility(device);
   const empty = !device;
   elements.deviceFocus.hidden = empty;
   elements.emptyState.hidden = !empty;
@@ -764,4 +770,81 @@ async function sendPlanAction(action) {
     if (error.payload?.request) applyPlanResponse(dialog, error.payload);
     else dialog.error = error.message || "操作结果未确认，正在查询";
   } finally { dialog.busy = false; updatePlanDialog(); }
+}
+
+let compatibilityKey = "";
+let compatibilityTimer;
+function closeCompatibilityHint() {
+  window.clearTimeout(compatibilityTimer);
+  document.querySelector("#compatibility-details").hidden = true;
+  document.querySelector("#compatibility-badge").setAttribute("aria-expanded", "false");
+}
+function openCompatibilityHint() {
+  const badge = document.querySelector("#compatibility-badge");
+  if (badge.hidden) return;
+  window.clearTimeout(compatibilityTimer);
+  const panel = document.querySelector("#compatibility-details");
+  panel.hidden = false;
+  badge.setAttribute("aria-expanded", "true");
+  const bounds = badge.getBoundingClientRect();
+  panel.style.left = `${Math.max(12, Math.min(bounds.left, innerWidth - panel.offsetWidth - 12))}px`;
+  panel.style.top = `${Math.max(12, Math.min(bounds.bottom + 8, innerHeight - panel.offsetHeight - 12))}px`;
+}
+function bindCompatibilityHint() {
+  const badge = document.querySelector("#compatibility-badge");
+  const panel = document.querySelector("#compatibility-details");
+  for (const node of [badge, panel]) {
+    node.addEventListener("mouseenter", openCompatibilityHint);
+    node.addEventListener("mouseleave", () => {
+      compatibilityTimer = window.setTimeout(() => {
+        if (!panel.contains(document.activeElement) && document.activeElement !== badge) closeCompatibilityHint();
+      }, 200);
+    });
+    node.addEventListener("focusout", () => {
+      window.setTimeout(() => {
+        if (!panel.contains(document.activeElement) && document.activeElement !== badge) closeCompatibilityHint();
+      }, 0);
+    });
+  }
+  badge.addEventListener("focus", openCompatibilityHint);
+  badge.addEventListener("click", openCompatibilityHint);
+  document.addEventListener("keydown", event => { if (event.key === "Escape") closeCompatibilityHint(); });
+  document.addEventListener("pointerdown", event => {
+    if (!panel.contains(event.target) && !badge.contains(event.target)) closeCompatibilityHint();
+  });
+  window.addEventListener("resize", () => { if (!panel.hidden) openCompatibilityHint(); });
+  window.addEventListener("scroll", () => { if (!panel.hidden) openCompatibilityHint(); });
+}
+function renderCompatibility(device) {
+  const result = device?.compatibility;
+  const key = JSON.stringify([device?.id, result]);
+  if (key === compatibilityKey) return;
+  compatibilityKey = key;
+  closeCompatibilityHint();
+  const badge = document.querySelector("#compatibility-badge");
+  const panel = document.querySelector("#compatibility-details");
+  document.querySelector("#client-version").textContent = device ? `客户端 ${result?.clientVersion || "版本未知"}${result?.historical ? " · 上次连接" : ""}` : "";
+  badge.textContent = result?.label || "";
+  badge.hidden = !result?.label;
+  panel.replaceChildren();
+  if (!result) return;
+  function paragraph(text) { const p = document.createElement("p"); p.textContent = text; panel.append(p); }
+  paragraph(`客户端 ${result.clientVersion} · 服务端 ${result.serverVersion}`);
+  paragraph(result.detail);
+  const missing = result.missing || [];
+  if (!missing.length) return;
+  const list = document.createElement("ul");
+  missing.forEach(feature => {
+    const item = document.createElement("li");
+    item.textContent = `${feature.name}：${feature.component === "client" ? "客户端" : "服务端"}未支持`;
+    list.append(item);
+  });
+  panel.append(list);
+  const targets = [...new Set(missing.map(feature => feature.target).filter(Boolean))];
+  if (targets.length) paragraph(`目录中可用版本：${targets.join("、")}${targets.some(v => v.includes("-")) ? "（包含测试版本）" : ""}`);
+  const help = document.createElement("details");
+  const summary = document.createElement("summary"); summary.textContent = "更新说明";
+  const text = document.createElement("p");
+  text.textContent = "客户端：下载对应版本，打开后选择更新并保留配对。服务端：使用对应 tag 的镜像或程序更新。版本信息来自内置目录，不代表最新发布版本。";
+  help.append(summary, text); panel.append(help);
 }

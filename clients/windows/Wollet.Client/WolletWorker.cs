@@ -48,13 +48,14 @@ internal sealed class WolletWorker : BackgroundService
         try { await engine.InitializeAsync(stoppingToken); }
         catch (Exception exception) { _logger.LogError(exception, "无法恢复关机计划，暂停连接"); await WaitUntilStoppedAsync(stoppingToken); return; }
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        var localServer = new DesktopPlanServer(engine);
+        var compatibility = new ConnectionCompatibility();
+        var localServer = new DesktopPlanServer(engine, compatibility);
         var localTask = localServer.RunAsync(lifetime.Token);
         var clockTask = RunPlanClockAsync(engine, lifetime.Token);
         var runner = new WolletConnectionRunner(
             _deviceInfoProvider,
             _shutdownController,
-            new LoggerClientLog(_logger), plans: engine);
+            new LoggerClientLog(_logger), plans: engine, compatibility: compatibility);
         Task? connectionTask = null;
         try
         {

@@ -62,7 +62,7 @@ internal static class Program
             credentialStore,
             new WindowsServiceInstaller(paths),
             deviceInfoProvider,
-            new WolletApiClient(httpClient));
+            new WolletApiClient(httpClient), new DesktopCompatibilityReader());
         try { Application.Run(new InstallerForm(coordinator)); }
         finally { installerMutex.ReleaseMutex(); }
         if (!args.Contains("--elevated-installer", StringComparer.OrdinalIgnoreCase)) TryStartDesktop();

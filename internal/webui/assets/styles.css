@@ -851,3 +851,14 @@ body:not([data-keyboard-navigation]) button:focus-visible {
     transition-duration: .01ms !important;
   }
 }
+
+.compatibility-line { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; color: #89909b; font-size: 12px; margin-top: 12px; }
+.compatibility-badge { font: inherit; color: #697382; background: #f5f6f8; border: 1px solid #e7e9ed; border-radius: 12px; padding: 3px 8px; cursor: pointer; }
+.compatibility-badge:focus-visible { outline: 2px solid #73849a; outline-offset: 3px; }
+.compatibility-details { position: fixed; z-index: 30; width: 340px; max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow: auto; box-sizing: border-box; padding: 16px; background: white; color: #58616d; border: 1px solid #e7e9ed; border-radius: 10px; box-shadow: 0 8px 30px #202a381a; font-size: 13px; line-height: 1.7; }
+.compatibility-details p { margin: 0 0 10px; overflow-wrap: anywhere; }
+.compatibility-details ul { padding-left: 20px; }
+.compatibility-details summary { cursor: pointer; }
+.compatibility-details details p { margin: 8px 0 0; }
+.server-version { display: block; text-align: center; color: #89909b; font-size: 11px; margin-top: 12px; }
+.compatibility-details { text-align: left; }

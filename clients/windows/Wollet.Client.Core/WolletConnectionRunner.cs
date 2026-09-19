@@ -18,18 +18,20 @@ public sealed class WolletConnectionRunner
     private readonly TimeProvider _timeProvider;
     private readonly ShutdownPlanEngine? _plans;
     private long _sequence;
+    private readonly ConnectionCompatibility? _compatibility;
 
     public WolletConnectionRunner(
         IDeviceInfoProvider deviceInfoProvider,
         IShutdownController shutdownController,
         IClientLog? log = null,
-        TimeProvider? timeProvider = null, ShutdownPlanEngine? plans = null)
+        TimeProvider? timeProvider = null, ShutdownPlanEngine? plans = null, ConnectionCompatibility? compatibility = null)
     {
         _deviceInfoProvider = deviceInfoProvider;
         _shutdownController = shutdownController;
         _log = log ?? NullClientLog.Instance;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _plans = plans;
+        _compatibility = compatibility;
     }
 
     public async Task RunAsync(ClientCredentials credentials, CancellationToken cancellationToken)
@@ -43,7 +45,8 @@ public sealed class WolletConnectionRunner
             try
             {
                 var identity = await _deviceInfoProvider.GetAsync(credentials.Server, cancellationToken);
-                await RunSessionAsync(credentials, identity, backoff.Reset, cancellationToken);
+                try { await RunSessionAsync(credentials, identity, backoff.Reset, cancellationToken); }
+                finally { _compatibility?.Disconnected(); }
                 return;
             }
             catch (DeviceCredentialsRejectedException)
@@ -94,10 +97,11 @@ public sealed class WolletConnectionRunner
             new ClientMessage
             {
                 Type = "hello",
+                ClientVersion = FeatureCatalog.RuntimeVersion,
                 ProtocolVersion = ProtocolVersion.Current,
                 DeviceName = identity.Name,
                 MacAddress = identity.MacAddress,
-                Capabilities = _plans is null ? null : ["shutdown-plan.v1"],
+                Capabilities = _plans is null ? null : FeatureCatalog.Default.Profiles[FeatureCatalog.Default.CurrentProfile].Client,
             },
             cancellationToken);
 
@@ -112,6 +116,8 @@ public sealed class WolletConnectionRunner
         }
 
         var supportsPlans = _plans is not null && ready.Capabilities?.Contains("shutdown-plan.v1") == true;
+        _compatibility?.Connected(ready.ServerVersion, ready.SupportedCapabilities ?? ["protocol.v1", .. ready.Capabilities ?? []],
+            _plans is null ? ["protocol.v1"] : FeatureCatalog.Default.Profiles[FeatureCatalog.Default.CurrentProfile].Client);
         if (supportsPlans)
         {
             if (!Guid.TryParse(ready.SessionId, out _)) throw new ClientProtocolException("计划会话无效");

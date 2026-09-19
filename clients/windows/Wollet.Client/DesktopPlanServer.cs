@@ -8,7 +8,7 @@ using Wollet.Client.Core;
 
 namespace Wollet.Client;
 
-internal sealed class DesktopPlanServer(ShutdownPlanEngine engine)
+internal sealed class DesktopPlanServer(ShutdownPlanEngine engine, ConnectionCompatibility compatibility)
 {
     public async Task RunAsync(CancellationToken token)
     {
@@ -35,6 +35,7 @@ internal sealed class DesktopPlanServer(ShutdownPlanEngine engine)
                 var request = await DesktopPlanWire.ReadAsync<DesktopPlanRequest>(pipe, deadline.Token);
                 DesktopPlanResponse response;
                 if (request.Action == "snapshot") response = new(await engine.SnapshotAsync(deadline.Token));
+                else if (request.Action == "compatibility") response = new(null, Compatibility: compatibility.Snapshot);
                 else if (request.Action is "cancel" or "execute")
                 {
                     var result = await engine.ApplyAsync(new("shutdown_plan_" + request.Action, Guid.NewGuid().ToString(),

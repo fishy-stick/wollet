@@ -10,7 +10,8 @@ internal sealed record StartupInspectionResult(
     ClientCredentials? Credentials,
     string Message,
     bool IsError,
-    bool IsSuccess);
+    bool IsSuccess,
+    CompatibilityResult? Compatibility = null);
 
 internal sealed class InstallCoordinator
 {
@@ -19,17 +20,19 @@ internal sealed class InstallCoordinator
     private readonly IClientInstaller _serviceInstaller;
     private readonly IDeviceInfoProvider _deviceInfoProvider;
     private readonly WolletApiClient _apiClient;
+    private readonly ICompatibilityReader? _compatibilityReader;
 
     public InstallCoordinator(
         ICredentialStore credentialStore,
         IClientInstaller serviceInstaller,
         IDeviceInfoProvider deviceInfoProvider,
-        WolletApiClient apiClient)
+        WolletApiClient apiClient, ICompatibilityReader? compatibilityReader = null)
     {
         _credentialStore = credentialStore;
         _serviceInstaller = serviceInstaller;
         _deviceInfoProvider = deviceInfoProvider;
         _apiClient = apiClient;
+        _compatibilityReader = compatibilityReader;
     }
 
     public async Task<StartupInspectionResult> InspectAsync(CancellationToken cancellationToken)
@@ -87,8 +90,11 @@ internal sealed class InstallCoordinator
                 IsSuccess: false);
         }
 
+        CompatibilityResult? localCompatibility = null;
+        StartupInspectionResult ConnectionFailure(string message) => ConnectionError(credentials, message) with { Compatibility = localCompatibility };
         try
         {
+            localCompatibility = _compatibilityReader is null ? null : await _compatibilityReader.ReadAsync(cancellationToken);
             var device = await _apiClient.GetCurrentDeviceAsync(credentials, cancellationToken);
             if (string.Equals(device.Status, "online", StringComparison.OrdinalIgnoreCase))
             {
@@ -96,7 +102,8 @@ internal sealed class InstallCoordinator
                     credentials,
                     "后台服务：已安装、正在运行，并已连接服务端。",
                     IsError: false,
-                    IsSuccess: true);
+                    IsSuccess: true,
+                    Compatibility: localCompatibility ?? device.Compatibility);
             }
 
             var reportedStatus = string.IsNullOrWhiteSpace(device.Status) ? "未知" : device.Status;
@@ -104,7 +111,8 @@ internal sealed class InstallCoordinator
                 credentials,
                 $"后台服务：已安装且正在运行，但服务端显示设备未连接（状态：{reportedStatus}）。",
                 IsError: true,
-                IsSuccess: false);
+                IsSuccess: false,
+                Compatibility: localCompatibility ?? device.Compatibility);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -112,27 +120,27 @@ internal sealed class InstallCoordinator
         }
         catch (OperationCanceledException)
         {
-            return ConnectionError(credentials, "连接服务端超时");
+            return ConnectionFailure("连接服务端超时");
         }
         catch (HttpRequestException exception)
         {
-            return ConnectionError(credentials, "无法连接服务端：" + exception.Message);
+            return ConnectionFailure("无法连接服务端：" + exception.Message);
         }
         catch (WolletApiException exception) when (exception.IsInvalidDeviceCredentials)
         {
-            return ConnectionError(credentials, "设备凭据已失效，请使用新 Token 重新绑定");
+            return ConnectionFailure("设备凭据已失效，请使用新 Token 重新绑定");
         }
         catch (WolletApiException exception)
         {
-            return ConnectionError(credentials, "服务端状态检查失败：" + exception.Message);
+            return ConnectionFailure("服务端状态检查失败：" + exception.Message);
         }
         catch (ClientProtocolException exception)
         {
-            return ConnectionError(credentials, "服务端响应无效：" + exception.Message);
+            return ConnectionFailure("服务端响应无效：" + exception.Message);
         }
         catch (Exception exception)
         {
-            return ConnectionError(credentials, "状态检查发生错误：" + exception.Message);
+            return ConnectionFailure("状态检查发生错误：" + exception.Message);
         }
     }
 

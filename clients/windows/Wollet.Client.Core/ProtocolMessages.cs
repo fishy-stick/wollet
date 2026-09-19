@@ -24,6 +24,7 @@ internal sealed record ApiErrorBody(
 
 internal sealed record ClientMessage
 {
+    public string? ClientVersion { get; init; }
     [JsonPropertyName("type")]
     public required string Type { get; init; }
 
@@ -60,6 +61,8 @@ internal sealed record ClientMessage
 
 internal sealed record ServerMessage
 {
+    public string? ServerVersion { get; init; }
+    public string[]? SupportedCapabilities { get; init; }
     [JsonPropertyName("type")]
     public string? Type { get; init; }
 

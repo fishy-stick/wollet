@@ -43,7 +43,8 @@ public sealed partial class CoreTests
             await stream.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"), timeout.Token);
             using var socket = WebSocket.CreateFromStream(stream, true, null, Timeout.InfiniteTimeSpan);
             using var hello = await ReceiveJsonAsync(socket, timeout.Token);
-            Assert.AreEqual("shutdown-plan.v1", hello.RootElement.GetProperty("capabilities")[0].GetString());
+            Assert.IsTrue(hello.RootElement.GetProperty("capabilities").EnumerateArray().Any(c => c.GetString() == "shutdown-plan.v1"));
+            Assert.IsTrue(hello.RootElement.TryGetProperty("clientVersion", out _));
             var session = Guid.NewGuid().ToString();
             await SendJsonAsync(socket, $$"""{"type":"ready","protocolVersion":1,"heartbeatIntervalSeconds":15,"offlineAfterSeconds":45,"sessionId":"{{session}}","capabilities":["shutdown-plan.v1"]}""", timeout.Token);
             long sequence = 0;

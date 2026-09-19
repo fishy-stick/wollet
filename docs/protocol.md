@@ -179,3 +179,13 @@ Authorization: Bearer <device-secret>
 - WebSocket 断开或连续 45 秒没有心跳时标记离线。
 - 在线状态只存在内存中；服务重启后设备先显示离线。
 - `lastSeenAt` 在连接和心跳时持久化。
+
+### 版本与功能兼容信息（v1.1.0）
+
+`hello` 增加可选 `clientVersion`，表示当前后台服务的产品版本。`ready` 增加可选 `serverVersion` 和 `supportedCapabilities`，后者表示服务端完整支持能力；已有 `capabilities` 仍只表示本次连接协商结果。协议版本保持 1，旧端可忽略新增字段。
+
+设备 REST 响应和 SSE 设备快照增加 `serverVersion`、`serverCapabilities`、`compatibility`。`compatibility` 包含 `kind`、`label`、两端显示版本、`missing`、`detail`、`historical`；每个缺失功能包含 `id`、`name`、`component` 和可选的目录目标 `target`。页面据此展示轻量标签，不根据产品版本切换关机协议。
+
+`GET /api/v1/server-info` 沿用管理接口认证，返回 `{version, capabilities, known}`，用于没有设备时显示服务端版本。离线设备的版本标为历史信息，不根据离线的空能力集合推断需要升级。未提供有效版本时保留未知状态，已确认能力仍可参与功能判断。
+
+功能目录与维护规则见 [版本信息与兼容提示](design/version-compatibility-hints.md)。

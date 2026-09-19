@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace Wollet.Client.Core;
 
 public sealed record DesktopPlanRequest(string Action, string? OperationId = null, long Revision = 0);
-public sealed record DesktopPlanResponse(ShutdownPlan? Plan, bool Accepted = true, string? Error = null);
+public sealed record DesktopPlanResponse(ShutdownPlan? Plan, bool Accepted = true, string? Error = null, CompatibilityResult? Compatibility = null);
 public static class DesktopPlanWire
 {
     public const string PipeName = "Wollet.ShutdownPlan.v1";

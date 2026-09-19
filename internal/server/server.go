@@ -30,6 +30,7 @@ type WOLSender interface {
 }
 
 type Server struct {
+	peers         peerRegistry
 	plans         *shutdownPlans
 	cfg           config.Config
 	store         *store.Store
@@ -73,6 +74,8 @@ func New(cfg config.Config, dataStore *store.Store, sender WOLSender, logger *sl
 }
 
 func (s *Server) routes() {
+	s.peers.live = make(map[string]peerInfo)
+	s.mux.HandleFunc("GET /api/v1/server-info", s.requireAdmin(s.handleServerInfo))
 	s.mux.HandleFunc("POST /api/v1/devices/{id}/shutdown-plans", s.requireSameOrigin(s.requireAdmin(s.handleShutdownPlan)))
 	s.mux.HandleFunc("GET /api/v1/devices/{id}/shutdown-plans/{operationId}", s.requireAdmin(s.handleShutdownPlan))
 	s.mux.HandleFunc("POST /api/v1/devices/{id}/shutdown-plans/{operationId}/{action}", s.requireSameOrigin(s.requireAdmin(s.handleShutdownPlan)))
