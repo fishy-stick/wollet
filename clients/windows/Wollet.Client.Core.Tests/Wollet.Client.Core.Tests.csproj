@@ -11,6 +11,7 @@
     <None Include="../../../internal/compatibility/fixtures.json" Link="compatibility-fixtures.json" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="../Wollet.Client/InstallCoordinator.cs" Link="InstallCoordinator.cs" />
     <Compile Include="../Wollet.Client/InstallationServices.cs" Link="InstallationServices.cs" />
+    <Compile Include="../Wollet.Client/DesktopPlanServer.cs" Link="DesktopPlanServer.cs" />
     <ProjectReference Include="../Wollet.Client.Core/Wollet.Client.Core.csproj" />
   </ItemGroup>
 </Project>
