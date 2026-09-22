@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine AS build
 
 ARG GOPROXY=https://goproxy.cn,direct
