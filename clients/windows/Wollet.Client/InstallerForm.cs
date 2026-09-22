@@ -9,11 +9,17 @@ internal sealed class InstallerForm : Form
     private readonly CancellationTokenSource _lifetime = new();
     private readonly TextBox _serverTextBox = new();
     private readonly TextBox _tokenTextBox = new();
+    private readonly Label _serverLabel = CreateFieldLabel("服务端地址");
+    private readonly Label _tokenLabel = CreateFieldLabel("绑定 Token");
     private readonly Button _installButton = new();
     private readonly Button _updateButton = new();
     private readonly Label _introduction = new();
     private readonly Button _uninstallButton = new();
     private readonly Label _statusLabel = new();
+    private readonly Label _connectionStatus = new();
+    private readonly System.Windows.Forms.Timer _refreshTimer = new() { Interval = 5_000 };
+    private CancellationTokenSource? _inspection;
+    private int _operationVersion;
     private readonly CompatibilityHint _compatibility = new();
     private readonly LinkLabel _refresh = new() { Text = "刷新状态", AutoSize = true };
     private bool _busy;
@@ -29,14 +35,15 @@ internal sealed class InstallerForm : Form
         // All layout dimensions below are authored at 100% (96 DPI).
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(520, 310);
+        ClientSize = new Size(520, 360);
         MinimumSize = SizeFromClientSize(ClientSize);
         AutoScroll = true;
         MaximizeBox = false;
         BuildLayout();
         ResumeLayout(performLayout: true);
         Shown += OnShown;
-        FormClosed += (_, _) => _lifetime.Cancel();
+        _refreshTimer.Tick += async (_, _) => await RefreshStatusAsync();
+        FormClosed += (_, _) => { _refreshTimer.Stop(); _lifetime.Cancel(); };
         FormClosing += (_, args) => { if (_busy) args.Cancel = true; };
     }
 
@@ -51,11 +58,12 @@ internal sealed class InstallerForm : Form
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Padding = new Padding(24),
             ColumnCount = 2,
-            RowCount = 7,
+            RowCount = 6,
         };
         layout.SuspendLayout();
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -69,20 +77,50 @@ internal sealed class InstallerForm : Form
         layout.Controls.Add(_introduction, 0, 0);
         layout.SetColumnSpan(_introduction, 2);
 
-        layout.Controls.Add(CreateFieldLabel("服务端地址"), 0, 1);
+        var status = new TableLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 3,
+            Margin = new Padding(0, 0, 0, 18),
+        };
+        status.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        status.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        for (var row = 0; row < 3; row++) status.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        status.Controls.Add(new Label { Text = "运行状态", AutoSize = true, Margin = new Padding(0, 0, 8, 8) }, 0, 0);
+        _refresh.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _refresh.Margin = new Padding(0, 0, 0, 8);
+        _refresh.LinkClicked += async (_, _) => await RefreshStatusAsync();
+        status.Controls.Add(_refresh, 1, 0);
+        _connectionStatus.AutoSize = true;
+        _connectionStatus.Dock = DockStyle.Fill;
+        _connectionStatus.UseMnemonic = false;
+        _connectionStatus.Margin = Padding.Empty;
+        _connectionStatus.Text = "正在检查后台服务状态…";
+        status.Controls.Add(_connectionStatus, 0, 1);
+        status.SetColumnSpan(_connectionStatus, 2);
+        _compatibility.Margin = new Padding(0, 4, 0, 0);
+        status.Controls.Add(_compatibility, 0, 2);
+        status.SetColumnSpan(_compatibility, 2);
+        layout.Controls.Add(status, 0, 1);
+        layout.SetColumnSpan(status, 2);
+
+        layout.Controls.Add(_serverLabel, 0, 2);
         _serverTextBox.Anchor = AnchorStyles.Left | AnchorStyles.Right;
         _serverTextBox.PlaceholderText = "例如 192.168.1.10:8080";
         _serverTextBox.Margin = new Padding(12, 0, 0, 12);
         _serverTextBox.TabIndex = 0;
-        layout.Controls.Add(_serverTextBox, 1, 1);
+        layout.Controls.Add(_serverTextBox, 1, 2);
 
-        layout.Controls.Add(CreateFieldLabel("绑定 Token"), 0, 2);
+        layout.Controls.Add(_tokenLabel, 0, 3);
         _tokenTextBox.Anchor = AnchorStyles.Left | AnchorStyles.Right;
         _tokenTextBox.PlaceholderText = "首次绑定请输入网页端生成的 Token";
         _tokenTextBox.CharacterCasing = CharacterCasing.Upper;
         _tokenTextBox.Margin = new Padding(12, 0, 0, 12);
         _tokenTextBox.TabIndex = 1;
-        layout.Controls.Add(_tokenTextBox, 1, 2);
+        layout.Controls.Add(_tokenTextBox, 1, 3);
 
         _installButton.AutoSize = true;
         _installButton.AutoSizeMode = AutoSizeMode.GrowAndShrink;
@@ -117,7 +155,7 @@ internal sealed class InstallerForm : Form
         actions.Controls.Add(_updateButton);
         actions.Controls.Add(_installButton);
         actions.Controls.Add(_uninstallButton);
-        layout.Controls.Add(actions, 0, 3);
+        layout.Controls.Add(actions, 0, 4);
         layout.SetColumnSpan(actions, 2);
 
         _statusLabel.AutoSize = true;
@@ -126,18 +164,12 @@ internal sealed class InstallerForm : Form
         _statusLabel.Margin = new Padding(0, 16, 0, 0);
         _statusLabel.TextAlign = ContentAlignment.TopLeft;
         _statusLabel.UseMnemonic = false;
-        layout.Controls.Add(_statusLabel, 0, 4);
+        layout.Controls.Add(_statusLabel, 0, 5);
         layout.SetColumnSpan(_statusLabel, 2);
-
-        layout.Controls.Add(_compatibility, 0, 5);
-        layout.SetColumnSpan(_compatibility, 2);
-        _refresh.LinkClicked += (_, _) => OnShown(this, EventArgs.Empty);
-        layout.Controls.Add(_refresh, 0, 6);
-        layout.SetColumnSpan(_refresh, 2);
-
         Controls.Add(layout);
         layout.ResumeLayout(performLayout: true);
         AcceptButton = _installButton;
+        UpdateActionAvailability();
     }
 
     private static Label CreateFieldLabel(string text) => new()
@@ -150,30 +182,54 @@ internal sealed class InstallerForm : Form
 
     private async void OnShown(object? sender, EventArgs eventArgs)
     {
-        SetBusy(true);
-        SetStatus("正在检查后台服务状态…", isError: false);
+        await RefreshStatusAsync(populateAddress: true);
+        if (!IsDisposed && !_lifetime.IsCancellationRequested) _refreshTimer.Start();
+    }
+
+    private async Task RefreshStatusAsync(bool populateAddress = false)
+    {
+        if (_busy || _inspection is not null || IsDisposed || _lifetime.IsCancellationRequested) return;
+        using var inspection = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        var operationVersion = _operationVersion;
+        _inspection = inspection;
+        inspection.CancelAfter(TimeSpan.FromSeconds(8));
+        _refresh.Enabled = false;
         try
         {
-            var inspection = await _coordinator.InspectAsync(_lifetime.Token);
-            if (inspection.Credentials is not null)
-            {
-                _serverTextBox.Text = inspection.Credentials.Server.AbsoluteUri.TrimEnd('/');
-            }
+            var result = await _coordinator.InspectAsync(inspection.Token);
+            if (inspection.IsCancellationRequested || _busy || IsDisposed) return;
+            if (populateAddress && !_serverTextBox.Modified && result.Credentials is not null)
+                _serverTextBox.Text = result.Credentials.Server.AbsoluteUri.TrimEnd('/');
 
-            RefreshVersionState(inspection.Credentials is not null);
-
-            SetStatus(inspection.Message, inspection.IsError, inspection.IsSuccess);
-            _compatibility.ShowResult(inspection.Compatibility);
+            RefreshVersionState(result.Credentials is not null);
+            _connectionStatus.Text = result.Message;
+            _connectionStatus.ForeColor = result.IsError ? Color.Firebrick
+                : result.IsSuccess ? Color.ForestGreen : SystemColors.GrayText;
+            _compatibility.ShowResult(result.Compatibility);
+            UpdateActionAvailability();
         }
-        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        catch (OperationCanceledException) when (inspection.IsCancellationRequested)
         {
+            if (operationVersion == _operationVersion && !_busy && !IsDisposed && !_lifetime.IsCancellationRequested)
+                ShowConnectionError("状态检查超时，将自动重试。更新／修复不受网络状态影响。");
         }
         catch (Exception exception)
         {
-            _compatibility.ShowResult(null);
-            SetStatus("后台服务状态检查失败：" + exception.Message, isError: true);
+            if (operationVersion == _operationVersion && !_busy && !IsDisposed && !_lifetime.IsCancellationRequested)
+                ShowConnectionError("后台服务状态检查失败：" + exception.Message);
         }
-        finally { if (!IsDisposed) SetBusy(false); }
+        finally
+        {
+            _inspection = null;
+            if (!IsDisposed) _refresh.Enabled = !_busy;
+        }
+    }
+
+    private void ShowConnectionError(string message)
+    {
+        _connectionStatus.Text = message;
+        _connectionStatus.ForeColor = Color.Firebrick;
+        _compatibility.ShowResult(null);
     }
 
     private void RefreshVersionState(bool hasCredentials)
@@ -181,6 +237,11 @@ internal sealed class InstallerForm : Form
         var versions = _coordinator.GetVersions();
         _canInstall = versions.Action is not (ClientUpdateAction.Downgrade or ClientUpdateAction.Unknown);
         _canUpdate = hasCredentials && _canInstall;
+        var updateAvailable = hasCredentials && versions.Action == ClientUpdateAction.Update;
+        _serverLabel.Visible = _serverTextBox.Visible = !updateAvailable;
+        _tokenLabel.Visible = _tokenTextBox.Visible = !updateAvailable;
+        _installButton.Visible = !updateAvailable;
+        if (updateAvailable) _canInstall = false;
         _updateButton.Visible = hasCredentials;
         _updateButton.Text = versions.Action == ClientUpdateAction.Repair ? "修复" : "更新";
         _installButton.Text = hasCredentials ? "绑定／更换服务端" : "安装并绑定";
@@ -189,6 +250,7 @@ internal sealed class InstallerForm : Form
         {
             ClientUpdateAction.Downgrade => "已安装更高版本，请运行相同或更新版本的客户端。",
             ClientUpdateAction.Unknown => "版本信息无法比较，请使用具有有效版本号的发布文件。",
+            _ when updateAvailable => "发现新版。点击“更新”即可保留现有配对，无需重新绑定。",
             _ when hasCredentials => "更新／修复会保留现有配对，无需填写 Token。",
             _ => "填入服务端地址和 Token，安装并绑定此电脑。",
         };
@@ -198,21 +260,22 @@ internal sealed class InstallerForm : Form
 
     private async void UpdateButtonOnClick(object? sender, EventArgs eventArgs)
     {
+        if (_busy) return;
         SetBusy(true);
         try
         {
             var progress = new ControlProgress(this, message => SetStatus(message, isError: false));
             await _coordinator.UpdateAsync(progress, _lifetime.Token);
-            _compatibility.ShowResult((await _coordinator.InspectAsync(_lifetime.Token)).Compatibility);
             RefreshVersionState(hasCredentials: true);
-            SetStatus("程序已更新／修复，后台服务已启动，现有配对保持不变；连接状态请在管理页面确认。", false, true);
+            SetStatus("程序已更新／修复，现有配对保持不变。", false, true);
         }
         catch (Exception exception) { ShowError(exception.Message); }
-        finally { if (!IsDisposed) SetBusy(false); }
+        finally { if (!IsDisposed) { SetBusy(false); await RefreshStatusAsync(); } }
     }
 
     private async void InstallButtonOnClick(object? sender, EventArgs eventArgs)
     {
+        if (_busy) return;
         SetBusy(true);
         try
         {
@@ -223,7 +286,6 @@ internal sealed class InstallerForm : Form
                 progress,
                 _lifetime.Token);
             _tokenTextBox.Clear();
-            _compatibility.ShowResult((await _coordinator.InspectAsync(_lifetime.Token)).Compatibility);
             RefreshVersionState(hasCredentials: true);
             SetStatus(
                 result.ReusedCredentials
@@ -244,6 +306,7 @@ internal sealed class InstallerForm : Form
             if (!IsDisposed)
             {
                 SetBusy(false);
+                await RefreshStatusAsync();
             }
         }
     }
@@ -264,6 +327,7 @@ internal sealed class InstallerForm : Form
             return;
         }
 
+        if (_busy) return;
         SetBusy(true);
         try
         {
@@ -296,20 +360,43 @@ internal sealed class InstallerForm : Form
             if (!IsDisposed)
             {
                 SetBusy(false);
+                await RefreshStatusAsync();
             }
         }
     }
 
     private void SetBusy(bool busy)
     {
-        _refresh.Enabled = !busy;
+        if (busy)
+        {
+            _operationVersion++;
+            _refreshTimer.Stop();
+            _inspection?.Cancel();
+        }
+        else if (!_lifetime.IsCancellationRequested) _refreshTimer.Start();
+        _refresh.Enabled = !busy && _inspection is null;
         _busy = busy;
         _serverTextBox.Enabled = !busy;
         _tokenTextBox.Enabled = !busy;
-        _installButton.Enabled = !busy && _canInstall;
-        _updateButton.Enabled = !busy && _canUpdate;
+        UpdateActionAvailability();
         _uninstallButton.Enabled = !busy;
         UseWaitCursor = busy;
+    }
+
+    private void UpdateActionAvailability()
+    {
+        _installButton.Enabled = !_busy && _canInstall;
+        _updateButton.Enabled = !_busy && _canUpdate;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _refreshTimer.Dispose();
+            _lifetime.Cancel();
+        }
+        base.Dispose(disposing);
     }
 
     private void ShowError(string message)

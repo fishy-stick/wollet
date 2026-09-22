@@ -135,6 +135,10 @@ Compose 默认使用 `ghcr.io/fishy-stick/wollet:latest`，数据库保存在 `.
 
 检测到本地绑定配置后，点击“更新”或“修复”即可保留原配对，无需填写 Token。更新不依赖服务端在线验证；后台服务启动后会尝试重新连接。凭据已失效时仍需通过“绑定／更换服务端”使用新 Token 绑定。
 
+已配对且安装包版本更高时，窗口仅提供“更新”和“卸载客户端”，隐藏地址、Token 和重新绑定入口。完成更新后，运行同版客户端可进行修复或重新绑定。
+
+管理窗口的“运行状态”每 5 秒自动检查，也可手动刷新；安装、更新或卸载期间暂停检查，完成后恢复。运行状态与操作结果分别显示，刷新不会覆盖正在填写的地址或 Token。
+
 更新先暂存程序，再停止服务并替换文件。失败时会尝试恢复原程序及服务运行状态；恢复未完成时，错误提示会给出后续修复方式。更新过程中请等待操作完成后再关闭窗口。
 
 不要通过卸载来更新：卸载会删除本地设备凭据。
@@ -200,6 +204,14 @@ go build -o wollet ./cmd/wollet
 go build -o wollet-sim ./cmd/wollet-sim
 ./wollet healthcheck --url http://127.0.0.1:8080/readyz
 ```
+
+本地构建 Docker 镜像时，请显式传入本次构建的版本号，例如：
+
+```bash
+docker build --build-arg VERSION=1.1.0-dev.4 -t wollet:local .
+```
+
+`1.1.0-dev.4` 仅为示例，按实际构建递增编号；镜像标签 `local` 不会自动成为程序版本。未传入 `VERSION` 时，服务端报告 `unknown`，页面和客户端会显示“版本未知”，刷新无法补出版本号。重建后需重新创建服务端容器才会生效。直接使用 `go build` 时可通过 `-ldflags="-X github.com/fishy-stick/wollet/internal/compatibility.Version=1.1.0-dev.4"` 注入版本。
 
 ### 模拟客户端
 

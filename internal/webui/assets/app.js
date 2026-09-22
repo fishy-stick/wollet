@@ -841,10 +841,23 @@ function renderCompatibility(device) {
   });
   panel.append(list);
   const targets = [...new Set(missing.map(feature => feature.target).filter(Boolean))];
-  if (targets.length) paragraph(`目录中可用版本：${targets.join("、")}${targets.some(v => v.includes("-")) ? "（包含测试版本）" : ""}`);
-  const help = document.createElement("details");
-  const summary = document.createElement("summary"); summary.textContent = "更新说明";
-  const text = document.createElement("p");
-  text.textContent = "客户端：下载对应版本，打开后选择更新并保留配对。服务端：使用对应 tag 的镜像或程序更新。版本信息来自内置目录，不代表最新发布版本。";
-  help.append(summary, text); panel.append(help);
+  if (targets.length) paragraph(`支持这些功能的参考版本：${targets.join("、")}`);
+  const heading = document.createElement("h3");
+  heading.textContent = "如何更新";
+  panel.append(heading);
+  if (missing.some(feature => feature.component === "client")) {
+    paragraph("客户端：下载新版 Windows 客户端，运行后选择“更新／修复”。无需先卸载，现有配对会保留。");
+  }
+  if (missing.some(feature => feature.component === "server")) {
+    paragraph("服务端：由管理员按发布说明更新 Docker 镜像或服务端程序，再重新连接客户端。");
+  }
+  const releases = document.createElement("a");
+  releases.href = "https://github.com/fishy-stick/wollet/releases";
+  releases.target = "_blank";
+  releases.rel = "noopener noreferrer";
+  releases.textContent = "前往 GitHub Releases 下载更新 ↗";
+  panel.append(releases);
+  if (targets.some(version => version.includes("-"))) {
+    paragraph("参考版本包含测试版；若发布页尚未提供，请使用对应测试构建或等待正式发布。");
+  }
 }

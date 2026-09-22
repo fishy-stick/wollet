@@ -1,4 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Net;
+using System.Net.Http.Json;
 using Wollet.Client;
 using Wollet.Client.Core;
 
@@ -185,6 +187,81 @@ public sealed class UpdateTests
         }
         finally { folder.Delete(true); }
     }
+    [TestMethod]
+    [DataRow("1.1.0-dev.3", "版本未知")]
+    [DataRow("版本未知", "1.1.0-dev.2")]
+    public async Task InspectionUsesFreshServerInformation(string remoteVersion, string cachedVersion)
+    {
+        var cached = new CompatibilityResult("unknown", "版本未知", "1.0.4", cachedVersion, [], "");
+        var fresh = cached with { ServerVersion = remoteVersion };
+        using var http = new HttpClient(new InspectionResponse(fresh));
+        var coordinator = new InstallCoordinator(new MemoryStore(), new FakeInstaller(), new RejectIdentity(),
+            new WolletApiClient(http), new CachedCompatibility(cached));
+        var result = await coordinator.InspectAsync(CancellationToken.None);
+        Assert.IsTrue(result.IsSuccess);
+        Assert.AreEqual(remoteVersion, result.Compatibility?.ServerVersion);
+        Assert.AreEqual("1.0.4", result.Compatibility?.ClientVersion);
+    }
+
+    [TestMethod]
+    public async Task InspectionFallsBackToIPCForLegacyServer()
+    {
+        var cached = new CompatibilityResult("unknown", "版本未知", "1.0.4", "版本未知", [], "");
+        using var http = new HttpClient(new InspectionResponse(null));
+        var coordinator = new InstallCoordinator(new MemoryStore(), new FakeInstaller(), new RejectIdentity(),
+            new WolletApiClient(http), new CachedCompatibility(cached));
+        var result = await coordinator.InspectAsync(CancellationToken.None);
+        Assert.AreEqual(cached, result.Compatibility);
+    }
+
+    [TestMethod]
+    public async Task InspectionTimeoutPreservesCredentialsForOfflineUpdate()
+    {
+        var store = new MemoryStore();
+        var installer = new FakeInstaller();
+        using var http = new HttpClient(new SlowInspection()) { Timeout = TimeSpan.FromMilliseconds(50) };
+        var coordinator = new InstallCoordinator(store, installer, new RejectIdentity(), new WolletApiClient(http));
+        var result = await coordinator.InspectAsync(CancellationToken.None);
+        Assert.IsTrue(result.IsError);
+        Assert.AreEqual(store.Credentials, result.Credentials);
+        await coordinator.UpdateAsync(new Progress<string>(), CancellationToken.None);
+        Assert.AreEqual(1, installer.Calls);
+        Assert.AreEqual(0, store.Writes);
+    }
+
+    [TestMethod]
+    public async Task CancelledInspectionDoesNotReportAConnectionFailure()
+    {
+        using var http = new HttpClient(new SlowInspection());
+        var coordinator = new InstallCoordinator(new MemoryStore(), new FakeInstaller(), new RejectIdentity(), new WolletApiClient(http));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => coordinator.InspectAsync(cancellation.Token));
+    }
+
+    private sealed class CachedCompatibility(CompatibilityResult result) : ICompatibilityReader
+    {
+        public Task<CompatibilityResult?> ReadAsync(CancellationToken token) => Task.FromResult<CompatibilityResult?>(result);
+    }
+
+    private sealed class InspectionResponse(CompatibilityResult? compatibility) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new DeviceSnapshot("device", "PC", "00:11:22:33:44:55", "online", null,
+                    DateTimeOffset.UtcNow, compatibility)),
+            });
+    }
+
+    private sealed class SlowInspection : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            throw new InvalidOperationException("Inspection should have been cancelled");
+        }
+    }
+
     private sealed class MemoryStore : ICredentialStore
     {
         public ClientCredentials? Credentials { get; set; } = new(new Uri("http://server"), "device", "secret");

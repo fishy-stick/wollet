@@ -94,8 +94,13 @@ internal sealed class InstallCoordinator
         StartupInspectionResult ConnectionFailure(string message) => ConnectionError(credentials, message) with { Compatibility = localCompatibility };
         try
         {
-            localCompatibility = _compatibilityReader is null ? null : await _compatibilityReader.ReadAsync(cancellationToken);
-            var device = await _apiClient.GetCurrentDeviceAsync(credentials, cancellationToken);
+            using var probe = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            probe.CancelAfter(TimeSpan.FromSeconds(5));
+            localCompatibility = _compatibilityReader is null ? null : await _compatibilityReader.ReadAsync(probe.Token);
+            var device = await _apiClient.GetCurrentDeviceAsync(credentials, probe.Token);
+            // The authenticated response describes the currently connected device.
+            // Do not let an older IPC snapshot hide a fresh server version.
+            var compatibility = device.Compatibility ?? localCompatibility;
             if (string.Equals(device.Status, "online", StringComparison.OrdinalIgnoreCase))
             {
                 return new StartupInspectionResult(
@@ -103,7 +108,7 @@ internal sealed class InstallCoordinator
                     "后台服务：已安装、正在运行，并已连接服务端。",
                     IsError: false,
                     IsSuccess: true,
-                    Compatibility: localCompatibility ?? device.Compatibility);
+                    Compatibility: compatibility);
             }
 
             var reportedStatus = string.IsNullOrWhiteSpace(device.Status) ? "未知" : device.Status;
@@ -112,7 +117,7 @@ internal sealed class InstallCoordinator
                 $"后台服务：已安装且正在运行，但服务端显示设备未连接（状态：{reportedStatus}）。",
                 IsError: true,
                 IsSuccess: false,
-                Compatibility: localCompatibility ?? device.Compatibility);
+                Compatibility: compatibility);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

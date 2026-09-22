@@ -250,9 +250,8 @@ body:not([data-keyboard-navigation]) button:focus-visible {
 .app-view {
   min-height: 100svh;
   padding: 64px 48px 34px;
-  display: grid;
-  grid-template-rows: auto minmax(470px, 1fr) auto;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .utilities {
@@ -302,7 +301,8 @@ body:not([data-keyboard-navigation]) button:focus-visible {
 
 .device-focus {
   min-height: 0;
-  padding: 68px 0 26px;
+  flex: 1 0 auto;
+  padding: clamp(20px, 4svh, 48px) 0 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -345,7 +345,7 @@ body:not([data-keyboard-navigation]) button:focus-visible {
 }
 
 .device-focus__activity {
-  margin: 6px 0 26px;
+  margin: 6px 0 12px;
   color: var(--muted);
   font-size: clamp(15px, 1.3vw, 19px);
   line-height: 1.4;
@@ -353,8 +353,9 @@ body:not([data-keyboard-navigation]) button:focus-visible {
 }
 
 .device-action {
-  width: clamp(220px, 20vw, 294px);
-  height: clamp(220px, 20vw, 294px);
+  width: clamp(210px, min(20vw, 28svh), 294px);
+  height: clamp(210px, min(20vw, 28svh), 294px);
+  flex-shrink: 0;
   border: 3px solid currentColor;
   border-radius: 50%;
   display: flex;
@@ -518,6 +519,7 @@ body:not([data-keyboard-navigation]) button:focus-visible {
 
 .empty-state {
   min-height: 0;
+  flex: 1 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -671,13 +673,11 @@ body:not([data-keyboard-navigation]) button:focus-visible {
   .app-view {
     min-height: 100svh;
     padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
-    grid-template-rows: auto minmax(450px, 1fr) auto auto;
-    overflow: hidden;
   }
 
   .utilities {
     position: static;
-    justify-self: end;
+    align-self: flex-end;
     gap: 28px;
     order: 0;
   }
@@ -724,13 +724,13 @@ body:not([data-keyboard-navigation]) button:focus-visible {
 
   .device-focus__activity {
     max-width: 100%;
-    margin: 5px 0 24px;
+    margin: 5px 0 12px;
     font-size: 14px;
   }
 
   .device-action {
-    width: min(64vw, 250px);
-    height: min(64vw, 250px);
+    width: min(60vw, 220px);
+    height: min(60vw, 220px);
   }
 
   .device-action__icon {
@@ -766,7 +766,7 @@ body:not([data-keyboard-navigation]) button:focus-visible {
 
   .remove-device {
     position: static;
-    justify-self: center;
+    align-self: center;
     margin-top: 20px;
     font-size: 14px;
   }
@@ -815,7 +815,6 @@ body:not([data-keyboard-navigation]) button:focus-visible {
 @media (max-height: 820px) and (min-width: 761px) {
   .app-view {
     padding-top: 34px;
-    grid-template-rows: auto minmax(370px, 1fr) auto;
   }
 
   .app-brand .brand__mark {
@@ -828,7 +827,7 @@ body:not([data-keyboard-navigation]) button:focus-visible {
   }
 
   .device-focus {
-    padding-top: 24px;
+    padding-top: 16px;
   }
 
   .device-action {
@@ -852,13 +851,13 @@ body:not([data-keyboard-navigation]) button:focus-visible {
   }
 }
 
-.compatibility-line { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; color: #89909b; font-size: 12px; margin-top: 12px; }
+.compatibility-line { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; color: #89909b; font-size: 12px; margin: 0 0 24px; }
 .compatibility-badge { font: inherit; color: #697382; background: #f5f6f8; border: 1px solid #e7e9ed; border-radius: 12px; padding: 3px 8px; cursor: pointer; }
 .compatibility-badge:focus-visible { outline: 2px solid #73849a; outline-offset: 3px; }
 .compatibility-details { position: fixed; z-index: 30; width: 340px; max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow: auto; box-sizing: border-box; padding: 16px; background: white; color: #58616d; border: 1px solid #e7e9ed; border-radius: 10px; box-shadow: 0 8px 30px #202a381a; font-size: 13px; line-height: 1.7; }
 .compatibility-details p { margin: 0 0 10px; overflow-wrap: anywhere; }
 .compatibility-details ul { padding-left: 20px; }
-.compatibility-details summary { cursor: pointer; }
-.compatibility-details details p { margin: 8px 0 0; }
+.compatibility-details h3 { margin: 16px 0 8px; color: var(--ink); font-size: 13px; }
+.compatibility-details a { display: inline-block; margin-bottom: 10px; color: var(--blue); text-underline-offset: 3px; }
 .server-version { display: block; text-align: center; color: #89909b; font-size: 11px; margin-top: 12px; }
 .compatibility-details { text-align: left; }
