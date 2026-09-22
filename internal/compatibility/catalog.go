@@ -173,7 +173,7 @@ func (c Catalog) Evaluate(client, server Endpoint) Result {
 	sc, sk := c.capabilities(server, "server")
 	if !ck || !sk {
 		r.Kind = "unknown"
-		r.Label = "版本未知"
+		r.Label = "兼容性未确认"
 		r.Detail = "功能支持尚未确认，连接后可重新检查。"
 		return r
 	}

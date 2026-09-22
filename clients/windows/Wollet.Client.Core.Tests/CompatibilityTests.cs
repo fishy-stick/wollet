@@ -19,15 +19,35 @@ public sealed class CompatibilityTests
         }
     }
     [TestMethod]
-    public void DisconnectClearsUpgradeAdvice()
+    public void DisconnectClearsCompatibilityLimits()
     {
         var state = new ConnectionCompatibility();
         state.Connected("1.0.4", ["protocol.v1"], ["protocol.v1", "shutdown-plan.v1"]);
-        Assert.AreEqual("server_upgrade", state.Snapshot.Kind);
+        Assert.AreEqual("limited", state.Snapshot.Kind);
         state.Disconnected();
         Assert.IsTrue(state.Snapshot.Historical);
         Assert.IsEmpty(state.Snapshot.Missing);
         Assert.AreEqual("待确认", state.Snapshot.Label);
+    }
+    [TestMethod]
+    public void StableUpgradeTargetsDoNotInferDevCapabilities()
+    {
+        Assert.IsFalse(FeatureCatalog.Default.Versions.Any(r => FeatureCatalog.Normalize(r.Version).Contains('-')));
+        var catalog = FeatureCatalog.Default with
+        {
+            Versions = [.. FeatureCatalog.Default.Versions, new("1.1.0", "plans", 110)]
+        };
+        var legacy = new CompatibilityEndpoint("1.0.4", null, true);
+        var stable = new CompatibilityEndpoint("1.1.0", null, true);
+        var clientUpgrade = catalog.Evaluate(legacy, stable);
+        Assert.AreEqual("client_upgrade", clientUpgrade.Kind);
+        Assert.AreEqual("1.1.0", clientUpgrade.Missing.Single().Target);
+        var serverUpgrade = catalog.Evaluate(stable, legacy);
+        Assert.AreEqual("server_upgrade", serverUpgrade.Kind);
+        Assert.AreEqual("1.1.0", serverUpgrade.Missing.Single().Target);
+        var dev = catalog.Evaluate(new("1.1.0-dev.999", null, true), stable);
+        Assert.AreEqual("unknown", dev.Kind);
+        Assert.AreEqual("兼容性未确认", dev.Label);
     }
     [TestMethod]
     public void NormalizeVersions()

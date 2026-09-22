@@ -3,6 +3,7 @@ package compatibility
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -42,7 +43,7 @@ func TestCatalogIntegrity(t *testing.T) {
 	orders := map[int]bool{}
 	for _, r := range Default.Versions {
 		n := Normalize(r.Version)
-		if n == "" || seen[n] || orders[r.Order] {
+		if n == "" || strings.Contains(n, "-") || seen[n] || orders[r.Order] {
 			t.Fatalf("invalid release %+v", r)
 		}
 		seen[n] = true
@@ -64,5 +65,27 @@ func TestNormalize(t *testing.T) {
 		if got := Normalize(input); got != want {
 			t.Errorf("%q: %q != %q", input, got, want)
 		}
+	}
+}
+
+func TestStableUpgradeTarget(t *testing.T) {
+	catalog := Default
+	// A synthetic future stable release verifies upgrade advice without publishing it.
+	catalog.Versions = append(append([]Release{}, Default.Versions...), Release{Version: "1.1.0", Profile: "plans", Order: 110})
+	legacy := Endpoint{Version: "1.0.4", Known: true}
+	stable := Endpoint{Version: "1.1.0", Known: true}
+	for _, clientOld := range []bool{true, false} {
+		client, server, kind := legacy, stable, "client_upgrade"
+		if !clientOld {
+			client, server, kind = stable, legacy, "server_upgrade"
+		}
+		got := catalog.Evaluate(client, server)
+		if got.Kind != kind || len(got.Missing) != 1 || got.Missing[0].Target != "1.1.0" {
+			t.Fatalf("stable upgrade: %+v", got)
+		}
+	}
+	got := catalog.Evaluate(Endpoint{Version: "1.1.0-dev.999", Known: true}, stable)
+	if got.Kind != "unknown" || got.Label != "兼容性未确认" {
+		t.Fatalf("dev inherited stable capabilities: %+v", got)
 	}
 }

@@ -53,7 +53,7 @@ public sealed record FeatureCatalog(FeatureDefinition[] Features, Dictionary<str
     {
         var result = new CompatibilityResult("compatible", "", Display(client.Version), Display(server.Version), [], "");
         var cc = Capabilities(client, true); var sc = Capabilities(server, false);
-        if (cc is null || sc is null) return result with { Kind = "unknown", Label = "版本未知", Detail = "功能支持尚未确认，连接后可重新检查。" };
+        if (cc is null || sc is null) return result with { Kind = "unknown", Label = "兼容性未确认", Detail = "功能支持尚未确认，连接后可重新检查。" };
         var missing = new List<MissingFeature>();
         foreach (var feature in Features)
         {

@@ -50,7 +50,7 @@ func TestCompatibilityHandshakeAndHistoricalState(t *testing.T) {
 	}
 	waitFor(t, time.Second, func() bool { return app.hub.IsOnline(id) })
 	result := app.compatibilityView(id)
-	if result.Kind != "client_upgrade" || result.Historical {
+	if result.Kind != "limited" || result.Historical {
 		t.Fatalf("online: %+v", result)
 	}
 	response := adminRequestForTest(t, host.URL, nil, "GET", "/api/v1/devices", nil)
@@ -61,7 +61,7 @@ func TestCompatibilityHandshakeAndHistoricalState(t *testing.T) {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if len(payload.Devices) != 1 || payload.Devices[0].Compatibility.Kind != "client_upgrade" {
+	if len(payload.Devices) != 1 || payload.Devices[0].Compatibility.Kind != "limited" {
 		t.Fatalf("REST: %+v", payload)
 	}
 	conn.CloseNow()
