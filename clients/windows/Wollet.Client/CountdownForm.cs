@@ -1,9 +1,5 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
-using System.IO.Pipes;
-using System.Runtime.InteropServices;
-using Microsoft.Win32;
-using Microsoft.Win32.SafeHandles;
 using Wollet.Client.Core;
 
 namespace Wollet.Client;
@@ -97,32 +93,57 @@ internal sealed class DesktopPlanContext : ApplicationContext
     private ShutdownPlan? _plan;
     private bool _busy;
     private bool _exiting;
+    private NotifyIcon? _connectionWarning;
+    private int _consecutiveFailures;
+    private string? _lastWarning;
     private DesktopPlanRequest? _pendingAction;
     private readonly WindowsPaths _paths = new();
     public DesktopPlanContext() { _poll.Tick += async (_, _) => await PollAsync(); _poll.Start(); }
     private async Task<DesktopPlanResponse> SendAsync(DesktopPlanRequest request)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        using var pipe = new NamedPipeClientStream(".", DesktopPlanWire.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-        await pipe.ConnectAsync(deadline.Token);
-        if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle, out var pid)) throw new IOException("无法验证后台服务");
-        using var server = Process.GetProcessById((int)pid);
-        using var handle = OpenProcess(0x1000, false, pid);
-        var image = new System.Text.StringBuilder(32768);
-        uint length = (uint)image.Capacity;
-        if (server.SessionId != 0 || handle.IsInvalid || !QueryFullProcessImageName(handle, 0, image, ref length) || !string.Equals(image.ToString(), _paths.InstalledExecutable, StringComparison.OrdinalIgnoreCase))
-            throw new IOException("后台服务身份无效");
-        await DesktopPlanWire.WriteAsync(pipe, request, deadline.Token);
-        return await DesktopPlanWire.ReadAsync<DesktopPlanResponse>(pipe, deadline.Token);
+        return await DesktopPlanClient.SendAsync(request, deadline.Token);
     }
     private async Task PollAsync()
     {
         if (File.Exists(Path.Combine(_paths.InstallDirectory, "desktop.stop"))) { ExitThread(); return; }
         if (_busy) return; _busy = true;
-        try { Apply(await SendAsync(new("snapshot"))); }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or System.Text.Json.JsonException or ArgumentException or OperationCanceledException or System.ComponentModel.Win32Exception or InvalidOperationException)
-        { _form?.ShowError("状态未同步，正在重新连接后台服务…"); }
+        try
+        {
+            var response = await SendAsync(new("snapshot"));
+            ClearConnectionWarning();
+            Apply(response);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException or ArgumentException or OperationCanceledException or System.ComponentModel.Win32Exception or InvalidOperationException)
+        { ShowConnectionWarning(ex); }
         finally { _busy = false; if (_pendingAction is { } request) { _pendingAction = null; await SendActionAsync(request); } }
+    }
+    private void ShowConnectionWarning(Exception error)
+    {
+        if (_exiting) return;
+        var message = error is OperationCanceledException ? "连接后台服务超时" : error.Message;
+        _form?.ShowError(message + "；正在重试…");
+        // Ignore brief startup/restart gaps and avoid a notification on every poll.
+        if (++_consecutiveFailures < 3 || _lastWarning == message) return;
+        _lastWarning = message;
+        if (_connectionWarning is null)
+        {
+            _connectionWarning = new NotifyIcon { Icon = SystemIcons.Warning, Text = "Wollet：桌面关机提示不可用" };
+            _connectionWarning.Click += (_, _) => _connectionWarning?.ShowBalloonTip(5000);
+        }
+        _connectionWarning.Visible = true;
+        _connectionWarning.BalloonTipTitle = "Wollet 桌面关机提示不可用";
+        _connectionWarning.BalloonTipText = message + "。后台关机计划可能仍会执行，请在管理页面检查或取消。客户端正在重试。";
+        _connectionWarning.BalloonTipIcon = ToolTipIcon.Warning;
+        _connectionWarning.ShowBalloonTip(5000);
+        Trace.TraceWarning("Wollet desktop IPC: {0}", error);
+    }
+    private void ClearConnectionWarning()
+    {
+        _consecutiveFailures = 0;
+        _lastWarning = null;
+        _connectionWarning?.Dispose();
+        _connectionWarning = null;
     }
     private void Apply(DesktopPlanResponse response)
     {
@@ -145,12 +166,9 @@ internal sealed class DesktopPlanContext : ApplicationContext
         if (_exiting) return;
         _busy = true;
         try { Apply(await SendAsync(request)); }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or System.Text.Json.JsonException or ArgumentException or OperationCanceledException or System.ComponentModel.Win32Exception or InvalidOperationException)
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException or ArgumentException or OperationCanceledException or System.ComponentModel.Win32Exception or InvalidOperationException)
         { _form?.ShowError("操作结果未确认，请重试"); }
         finally { _busy = false; }
     }
-    protected override void ExitThreadCore() { _exiting = true; _pendingAction = null; _poll.Stop(); _poll.Dispose(); _form?.Finish(); base.ExitThreadCore(); }
-    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GetNamedPipeServerProcessId(SafePipeHandle handle, out uint processId);
-    [DllImport("kernel32.dll", SetLastError = true)] private static extern SafeProcessHandle OpenProcess(uint access, bool inherit, uint pid);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool QueryFullProcessImageName(SafeProcessHandle process, uint flags, System.Text.StringBuilder name, ref uint size);
+    protected override void ExitThreadCore() { _exiting = true; _pendingAction = null; _poll.Stop(); _poll.Dispose(); ClearConnectionWarning(); _form?.Finish(); base.ExitThreadCore(); }
 }

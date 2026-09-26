@@ -42,8 +42,18 @@ internal sealed class DesktopPlanServer(ShutdownPlanEngine engine, ConnectionCom
                 response = new(await engine.SnapshotAsync(deadline.Token), result.Accepted, result.Code);
             }
             else response = new(null, false, "invalid_request");
-            await DesktopPlanWire.WriteAsync(pipe, response, deadline.Token);
+            await WriteResponseAsync(pipe, response, deadline.Token);
         }, token);
+    }
+
+    internal static async Task WriteResponseAsync(NamedPipeServerStream pipe,
+        DesktopPlanResponse response, CancellationToken token)
+    {
+        await DesktopPlanWire.WriteAsync(pipe, response, token);
+        // Disconnect discards unread pipe data. Keep the instance connected until
+        // the client has consumed the response and closed, bounded by the request deadline.
+        var trailingBytes = await pipe.ReadAsync(new byte[1], token);
+        if (trailingBytes != 0) throw new InvalidDataException("每个管道连接仅允许一个请求");
     }
 
     internal static async Task RunConnectionsAsync(NamedPipeServerStream pipe,

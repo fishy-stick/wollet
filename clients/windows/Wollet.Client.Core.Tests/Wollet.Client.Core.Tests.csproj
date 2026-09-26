@@ -12,6 +12,9 @@
     <Compile Include="../Wollet.Client/InstallCoordinator.cs" Link="InstallCoordinator.cs" />
     <Compile Include="../Wollet.Client/InstallationServices.cs" Link="InstallationServices.cs" />
     <Compile Include="../Wollet.Client/DesktopPlanServer.cs" Link="DesktopPlanServer.cs" />
+    <Compile Include="../Wollet.Client/DesktopServiceIdentity.cs" Link="DesktopServiceIdentity.cs" />
+    <Compile Include="../Wollet.Client/DesktopPlanClient.cs" Link="DesktopPlanClient.cs" />
+    <Compile Include="../Wollet.Client/DesktopCompatibilityReader.cs" Link="DesktopCompatibilityReader.cs" />
     <ProjectReference Include="../Wollet.Client.Core/Wollet.Client.Core.csproj" />
   </ItemGroup>
 </Project>

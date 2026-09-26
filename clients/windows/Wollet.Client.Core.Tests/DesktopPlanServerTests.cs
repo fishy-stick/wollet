@@ -2,6 +2,7 @@ using System.IO.Pipes;
 using System.Runtime.Versioning;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Wollet.Client;
+using Wollet.Client.Core;
 
 namespace Wollet.Client.Core.Tests;
 
@@ -9,6 +10,26 @@ namespace Wollet.Client.Core.Tests;
 [SupportedOSPlatform("windows")]
 public sealed class DesktopPlanServerTests
 {
+    [TestMethod]
+    public async Task ResponseIsNotDiscardedBeforeSlowClientReadsIt()
+    {
+        var name = "Wollet.Test." + Guid.NewGuid().ToString("N");
+        using var pipe = new NamedPipeServerStream(name, PipeDirection.InOut, 1,
+            PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var wait = pipe.WaitForConnectionAsync(timeout.Token);
+        using var client = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await client.ConnectAsync(timeout.Token);
+        await wait;
+        var response = DesktopPlanServer.WriteResponseAsync(pipe, new(null, Error: new string('x', 2000)), timeout.Token);
+        await Task.Delay(100, timeout.Token);
+        Assert.IsFalse(response.IsCompleted, "Server must not recycle the pipe before the client reads");
+        var received = await DesktopPlanWire.ReadAsync<DesktopPlanResponse>(client, timeout.Token);
+        Assert.AreEqual(2000, received.Error!.Length);
+        client.Dispose();
+        await response;
+    }
+
     [TestMethod]
     public async Task BrokenClientDoesNotStopListenerAndNextClientGetsResponse()
     {
