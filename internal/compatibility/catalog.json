@@ -10,7 +10,8 @@
     "plans":{"client":["protocol.v1","pairing-preserved.v1","shutdown-plan.v1"],"server":["protocol.v1","shutdown-plan.v1"]}
   },
   "versions": [
-    {"version":"1.0.4","profile":"legacy","order":104}
+    {"version":"1.0.4","profile":"legacy","order":104},
+    {"version":"1.1.0","profile":"plans","order":110}
   ],
   "currentProfile":"plans"
 }

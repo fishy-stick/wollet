@@ -23,7 +23,7 @@ public sealed class CompatibilityTests
     {
         var state = new ConnectionCompatibility();
         state.Connected("1.0.4", ["protocol.v1"], ["protocol.v1", "shutdown-plan.v1"]);
-        Assert.AreEqual("limited", state.Snapshot.Kind);
+        Assert.AreEqual("server_upgrade", state.Snapshot.Kind);
         state.Disconnected();
         Assert.IsTrue(state.Snapshot.Historical);
         Assert.IsEmpty(state.Snapshot.Missing);
@@ -33,10 +33,7 @@ public sealed class CompatibilityTests
     public void StableUpgradeTargetsDoNotInferDevCapabilities()
     {
         Assert.IsFalse(FeatureCatalog.Default.Versions.Any(r => FeatureCatalog.Normalize(r.Version).Contains('-')));
-        var catalog = FeatureCatalog.Default with
-        {
-            Versions = [.. FeatureCatalog.Default.Versions, new("1.1.0", "plans", 110)]
-        };
+        var catalog = FeatureCatalog.Default;
         var legacy = new CompatibilityEndpoint("1.0.4", null, true);
         var stable = new CompatibilityEndpoint("1.1.0", null, true);
         var clientUpgrade = catalog.Evaluate(legacy, stable);

@@ -70,8 +70,6 @@ func TestNormalize(t *testing.T) {
 
 func TestStableUpgradeTarget(t *testing.T) {
 	catalog := Default
-	// A synthetic future stable release verifies upgrade advice without publishing it.
-	catalog.Versions = append(append([]Release{}, Default.Versions...), Release{Version: "1.1.0", Profile: "plans", Order: 110})
 	legacy := Endpoint{Version: "1.0.4", Known: true}
 	stable := Endpoint{Version: "1.1.0", Known: true}
 	for _, clientOld := range []bool{true, false} {
