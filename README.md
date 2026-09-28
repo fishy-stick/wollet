@@ -121,13 +121,39 @@ Compose 默认使用 `ghcr.io/fishy-stick/wollet:latest`，数据库保存在 `.
 | `wollet-client-win-x64-framework-dependent.exe` | 文件更小；需要预先安装 x64 .NET 10 Desktop Runtime |
 
 1. 在 Wollet 管理页面生成绑定 Token，并复制服务器地址。
-2. 以管理员身份运行客户端，填入服务器地址和 Token。
+2. 双击运行客户端并允许安装管理窗口提权，填入服务器地址和 Token。
 3. 点击“安装并绑定”。客户端会安装为 Windows 后台服务并自动连接服务器。
 4. 返回管理页面；设备显示在线后即可远程控制。
 
-再次运行客户端可以检查服务状态、修复现有安装或卸载服务。客户端配置位于 `%ProgramData%\Wollet`，设备密钥由 Windows DPAPI 保护。
+再次运行客户端可以检查服务状态、更新或修复现有安装，以及卸载服务。客户端配置位于 `%ProgramData%\Wollet`，设备密钥由 Windows DPAPI 保护。
+
+### 更新 Windows 客户端
+
+下载新版单文件客户端，双击运行并允许安装管理窗口提权。窗口显示已安装版本和当前程序版本：当前程序较新时提供“更新”，版本相同时提供“修复”，较旧或版本无法比较时禁止覆盖。
+
+版本比较支持开发版与候选版，例如 `1.1.0-dev.2 < 1.1.0-dev.10 < 1.1.0-rc.1 < 1.1.0`；`+` 后的构建信息不影响排序。
+
+检测到本地绑定配置后，点击“更新”或“修复”即可保留原配对，无需填写 Token。更新不依赖服务端在线验证；后台服务启动后会尝试重新连接。凭据已失效时仍需通过“绑定／更换服务端”使用新 Token 绑定。
+
+已配对且安装包版本更高时，窗口仅提供“更新”和“卸载客户端”，隐藏地址、Token 和重新绑定入口。完成更新后，运行同版客户端可进行修复或重新绑定。
+
+管理窗口的“运行状态”每 5 秒自动检查，也可手动刷新；安装、更新或卸载期间暂停检查，完成后恢复。运行状态与操作结果分别显示，刷新不会覆盖正在填写的地址或 Token。
+
+更新先暂存程序，再停止服务并替换文件。失败时会尝试恢复原程序及服务运行状态；恢复未完成时，错误提示会给出后续修复方式。更新过程中请等待操作完成后再关闭窗口。
+
+不要通过卸载来更新：卸载会删除本地设备凭据。
 
 Windows 客户端的绑定、状态检查和后台连接均直连服务端，不使用系统代理或代理环境变量。
+
+### 同步关机倒计时（v1.1.0 开发版）
+
+服务端和客户端均支持新版能力时，网页点击关机便在客户端开始十秒倒计时。目标电脑显示居中的环形倒计时弹窗，两端均可取消或立即执行，无需客户端再次确认。普通用户提示组件随登录启动；直接以管理员身份安装时，请在安装完成后关闭管理窗口以启动当前会话提示。
+
+关闭网页或临时断网不会取消已接受的计划，本地按钮仍可操作。锁屏、无人登录或提示组件不可用时，后台服务继续执行；服务重启、更新和系统睡眠恢复会取消未执行计划。首版桌面提示仅面向活动控制台会话，RDP 会话暂不支持。
+
+网页显示“结果尚未确认”时，请等待查询或在客户端操作；这不表示关机已取消。已提交系统的关机不自动重试。旧客户端保留网页本地倒计时流程。
+
+模拟器默认启用新版协议，`--shutdown-plans=false` 测试旧流程，`--local-cancel-after=3s` 模拟本地取消，`--exit-on-shutdown=false` 保留进程便于检查终态。模拟器不会关闭真实电脑。
 
 ## 配置
 
@@ -179,6 +205,14 @@ go build -o wollet-sim ./cmd/wollet-sim
 ./wollet healthcheck --url http://127.0.0.1:8080/readyz
 ```
 
+本地构建 Docker 镜像时，请显式传入本次构建的版本号，例如：
+
+```bash
+docker build --build-arg VERSION=1.1.0-dev.4 -t wollet:local .
+```
+
+`1.1.0-dev.4` 仅为示例，按实际构建递增编号；镜像标签 `local` 不会自动成为程序版本。未传入 `VERSION` 时，服务端报告 `unknown`，页面和客户端会显示“版本未知”，刷新无法补出版本号。重建后需重新创建服务端容器才会生效。直接使用 `go build` 时可通过 `-ldflags="-X github.com/fishy-stick/wollet/internal/compatibility.Version=1.1.0-dev.4"` 注入版本。
+
 ### 模拟客户端
 
 模拟客户端可以在没有 Windows 电脑时测试绑定、在线状态和关机指令。先在管理页面生成 Token：
@@ -213,6 +247,41 @@ dotnet publish clients/windows/Wollet.Client/Wollet.Client.csproj \
 
 体积较小的 framework-dependent 版本使用 `win-x64-framework-dependent` Publish Profile。
 
+本地测试构建可显式指定预发布版本，每轮测试递增 `dev.N`：
+
+```powershell
+dotnet publish clients/windows/Wollet.Client/Wollet.Client.csproj -p:PublishProfile=win-x64 -p:Version=1.1.0-dev.1
+```
+
+同一测试版本可通过“修复”重新安装。若已经安装 `1.1.0` 正式版，`1.1.0-dev.N` 会被视为旧版并阻止覆盖。本地构建无需打 tag。
+
+### 发布与部署测试版
+
+提交需要测试的代码后，在该提交上创建并推送递增的测试 tag，例如：
+
+```sh
+git tag v1.1.0-dev.3
+git push origin v1.1.0-dev.3
+```
+
+`Release` 工作流先校验 tag 的语义版本，再构建 Linux amd64／arm64 镜像和两种 Windows 客户端。带预发布标识的 tag（如 `dev.N`、`rc.N`）创建 GitHub Pre-release，不标为 Latest；镜像仅发布完整版本标签，例如 `v1.1.0-dev.3` 和 `1.1.0-dev.3`，不更新 `latest`、`1` 或 `1.1`。正式 tag（如 `v1.1.0`）沿用正式发布流程。
+
+等待 `Publish Docker image` 成功后，在服务端部署目录的 `.env` 中指定测试镜像：
+
+```dotenv
+WOLLET_IMAGE=ghcr.io/fishy-stick/wollet:v1.1.0-dev.3
+```
+
+然后执行：
+
+```sh
+docker compose pull wollet
+docker compose up -d wollet
+docker compose logs -f wollet
+```
+
+Windows 客户端可在对应的 GitHub Pre-release 附件中下载。下一轮测试使用新的 `dev.N` tag，并同步更新部署镜像版本；发布前还需核对功能目录中的版本映射。
+
 ### 测试
 
 ```bash
@@ -239,3 +308,5 @@ dotnet test --project clients/windows/Wollet.Client.Core.Tests/Wollet.Client.Cor
 ## 通信协议
 
 REST API、SSE 事件、客户端认证及 WebSocket 消息格式见 [docs/protocol.md](docs/protocol.md)。
+
+后续开发需求与待讨论事项见 [开发规划](docs/development-plan.md)。

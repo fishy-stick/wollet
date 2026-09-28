@@ -49,6 +49,13 @@ func (s *Server) handleWakeDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleShutdownDevice(w http.ResponseWriter, r *http.Request) {
+	s.plans.mu.Lock()
+	hasPlan := s.plans.connections[r.PathValue("id")] != nil
+	s.plans.mu.Unlock()
+	if hasPlan {
+		writeError(w, 409, "shutdown_plan_required", "请刷新页面后使用关机计划")
+		return
+	}
 	id := r.PathValue("id")
 	if _, err := s.store.GetDevice(r.Context(), id); errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "device_not_found", "设备不存在")

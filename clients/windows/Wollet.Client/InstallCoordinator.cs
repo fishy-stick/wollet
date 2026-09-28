@@ -10,25 +10,29 @@ internal sealed record StartupInspectionResult(
     ClientCredentials? Credentials,
     string Message,
     bool IsError,
-    bool IsSuccess);
+    bool IsSuccess,
+    CompatibilityResult? Compatibility = null);
 
 internal sealed class InstallCoordinator
 {
-    private readonly WindowsCredentialStore _credentialStore;
-    private readonly WindowsServiceInstaller _serviceInstaller;
+    public ClientUpdateVersion GetVersions() => _serviceInstaller.GetVersions();
+    private readonly ICredentialStore _credentialStore;
+    private readonly IClientInstaller _serviceInstaller;
     private readonly IDeviceInfoProvider _deviceInfoProvider;
     private readonly WolletApiClient _apiClient;
+    private readonly ICompatibilityReader? _compatibilityReader;
 
     public InstallCoordinator(
-        WindowsCredentialStore credentialStore,
-        WindowsServiceInstaller serviceInstaller,
+        ICredentialStore credentialStore,
+        IClientInstaller serviceInstaller,
         IDeviceInfoProvider deviceInfoProvider,
-        WolletApiClient apiClient)
+        WolletApiClient apiClient, ICompatibilityReader? compatibilityReader = null)
     {
         _credentialStore = credentialStore;
         _serviceInstaller = serviceInstaller;
         _deviceInfoProvider = deviceInfoProvider;
         _apiClient = apiClient;
+        _compatibilityReader = compatibilityReader;
     }
 
     public async Task<StartupInspectionResult> InspectAsync(CancellationToken cancellationToken)
@@ -69,7 +73,7 @@ internal sealed class InstallCoordinator
         {
             var configurationHint = credentials is null
                 ? string.Empty
-                : "；检测到现有绑定配置，可点击“安装并绑定”修复";
+                : "；检测到现有绑定配置，可点击“更新／修复”保留配对并更新程序";
             return new StartupInspectionResult(
                 credentials,
                 DescribeServiceState(serviceState) + configurationHint + "。",
@@ -86,16 +90,25 @@ internal sealed class InstallCoordinator
                 IsSuccess: false);
         }
 
+        CompatibilityResult? localCompatibility = null;
+        StartupInspectionResult ConnectionFailure(string message) => ConnectionError(credentials, message) with { Compatibility = localCompatibility };
         try
         {
-            var device = await _apiClient.GetCurrentDeviceAsync(credentials, cancellationToken);
+            using var probe = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            probe.CancelAfter(TimeSpan.FromSeconds(5));
+            localCompatibility = _compatibilityReader is null ? null : await _compatibilityReader.ReadAsync(probe.Token);
+            var device = await _apiClient.GetCurrentDeviceAsync(credentials, probe.Token);
+            // The authenticated response describes the currently connected device.
+            // Do not let an older IPC snapshot hide a fresh server version.
+            var compatibility = device.Compatibility ?? localCompatibility;
             if (string.Equals(device.Status, "online", StringComparison.OrdinalIgnoreCase))
             {
                 return new StartupInspectionResult(
                     credentials,
                     "后台服务：已安装、正在运行，并已连接服务端。",
                     IsError: false,
-                    IsSuccess: true);
+                    IsSuccess: true,
+                    Compatibility: compatibility);
             }
 
             var reportedStatus = string.IsNullOrWhiteSpace(device.Status) ? "未知" : device.Status;
@@ -103,7 +116,8 @@ internal sealed class InstallCoordinator
                 credentials,
                 $"后台服务：已安装且正在运行，但服务端显示设备未连接（状态：{reportedStatus}）。",
                 IsError: true,
-                IsSuccess: false);
+                IsSuccess: false,
+                Compatibility: compatibility);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -111,27 +125,27 @@ internal sealed class InstallCoordinator
         }
         catch (OperationCanceledException)
         {
-            return ConnectionError(credentials, "连接服务端超时");
+            return ConnectionFailure("连接服务端超时");
         }
         catch (HttpRequestException exception)
         {
-            return ConnectionError(credentials, "无法连接服务端：" + exception.Message);
+            return ConnectionFailure("无法连接服务端：" + exception.Message);
         }
         catch (WolletApiException exception) when (exception.IsInvalidDeviceCredentials)
         {
-            return ConnectionError(credentials, "设备凭据已失效，请使用新 Token 重新绑定");
+            return ConnectionFailure("设备凭据已失效，请使用新 Token 重新绑定");
         }
         catch (WolletApiException exception)
         {
-            return ConnectionError(credentials, "服务端状态检查失败：" + exception.Message);
+            return ConnectionFailure("服务端状态检查失败：" + exception.Message);
         }
         catch (ClientProtocolException exception)
         {
-            return ConnectionError(credentials, "服务端响应无效：" + exception.Message);
+            return ConnectionFailure("服务端响应无效：" + exception.Message);
         }
         catch (Exception exception)
         {
-            return ConnectionError(credentials, "状态检查发生错误：" + exception.Message);
+            return ConnectionFailure("状态检查发生错误：" + exception.Message);
         }
     }
 
@@ -172,6 +186,7 @@ internal sealed class InstallCoordinator
         CancellationToken cancellationToken)
     {
         var server = ServerAddress.Normalize(serverValue);
+        EnsureVersionCanBeInstalled();
         progress.Report("正在验证安装程序…");
         _serviceInstaller.ValidateSource();
         progress.Report("正在检查现有配置…");
@@ -221,10 +236,32 @@ internal sealed class InstallCoordinator
             await _credentialStore.SaveAsync(credentials, cancellationToken);
         }
 
-        progress.Report("正在准备 Windows Service…");
-        await _serviceInstaller.PrepareAsync(cancellationToken);
-        progress.Report("正在启动 Windows Service…");
-        await _serviceInstaller.StartAsync(cancellationToken);
+        progress.Report("正在安装程序并启动 Windows Service…");
+        await _serviceInstaller.InstallOrUpdateAsync(cancellationToken);
         return new InstallationResult(credentials.DeviceId, reusedCredentials);
+    }
+
+    public async Task<InstallationResult> UpdateAsync(
+        IProgress<string> progress,
+        CancellationToken cancellationToken)
+    {
+        EnsureVersionCanBeInstalled();
+        _serviceInstaller.ValidateSource();
+        var credentials = await _credentialStore.TryLoadAsync(cancellationToken)
+            ?? throw new InvalidOperationException("本地绑定配置缺失，请先使用 Token 安装并绑定。");
+
+        // Updating the executable must not depend on network availability or rewrite credentials.
+        progress.Report("正在更新程序并恢复后台服务，保留现有配对…");
+        await _serviceInstaller.InstallOrUpdateAsync(cancellationToken);
+        return new InstallationResult(credentials.DeviceId, ReusedCredentials: true);
+    }
+
+    private void EnsureVersionCanBeInstalled()
+    {
+        var versions = GetVersions();
+        if (versions.Action == ClientUpdateAction.Downgrade)
+            throw new InvalidOperationException("已安装的客户端版本更高，请运行相同或更新版本的客户端。");
+        if (versions.Action == ClientUpdateAction.Unknown)
+            throw new InvalidOperationException("无法比较客户端版本，请使用具有有效版本号的发布文件；现有安装保持不变。");
     }
 }

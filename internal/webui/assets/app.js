@@ -8,6 +8,7 @@ const state = {
   authEnabled: true,
   confirmAction: null,
   confirmTimer: null,
+  planDialog: null,
   tokenTimer: null,
   tokenDeviceIds: null,
   toastTimer: null,
@@ -55,6 +56,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   bindInteractions();
+  bindCompatibilityHint();
   bootstrap();
 });
 
@@ -76,7 +78,13 @@ function bindInteractions() {
   elements.copyServer.addEventListener("click", copyServerAddress);
   elements.tokenDialog.addEventListener("close", clearTokenDialog);
   elements.confirmDialog.addEventListener("close", clearConfirmDialog);
-  elements.confirmCancel.addEventListener("click", () => elements.confirmDialog.close());
+  elements.confirmCancel.addEventListener("click", () => {
+    if (state.planDialog && state.planDialog.active) void sendPlanAction("cancel");
+    else elements.confirmDialog.close();
+  });
+  elements.confirmDialog.addEventListener("cancel", event => {
+    if (state.planDialog?.active) { event.preventDefault(); void sendPlanAction("cancel"); }
+  });
   elements.confirmSubmit.addEventListener("click", runConfirmedAction);
   state.relativeTimeTimer = window.setInterval(refreshSelectedDeviceMeta, 30_000);
 }
@@ -96,6 +104,7 @@ async function bootstrap() {
 }
 
 function showLogin(message = "") {
+  closeCompatibilityHint();
   closeEvents();
   elements.bootView.hidden = true;
   elements.appView.hidden = true;
@@ -106,6 +115,9 @@ function showLogin(message = "") {
 }
 
 async function showApp() {
+  void api("/api/v1/server-info").then(info => {
+    document.querySelector("#server-version").textContent = `服务端 ${info.version === "unknown" ? "版本未知" : info.version}`;
+  }).catch(() => { document.querySelector("#server-version").textContent = "服务端版本未知"; });
   elements.bootView.hidden = true;
   elements.loginView.hidden = true;
   elements.appView.hidden = false;
@@ -206,6 +218,7 @@ function closeEvents() {
 }
 
 function applySnapshot(devices) {
+  devices.forEach(observePlan);
   const pairedDevice = findNewlyPairedDevice(devices);
   state.devices = devices;
   sortDevices();
@@ -215,6 +228,7 @@ function applySnapshot(devices) {
 }
 
 function applyDeviceUpdate(device) {
+  observePlan(device);
   const index = state.devices.findIndex(item => item.id === device.id);
   const isNew = index === -1;
   if (isNew) {
@@ -261,6 +275,7 @@ function selectedDevice() {
 
 function render() {
   const device = selectedDevice();
+  renderCompatibility(device);
   const empty = !device;
   elements.deviceFocus.hidden = empty;
   elements.emptyState.hidden = !empty;
@@ -294,6 +309,12 @@ function render() {
 }
 
 function devicePresentation(device) {
+  if (device.shutdownPlan?.state === "scheduled") {
+    return { statusKey: "shutting_down", statusText: "关机倒计时", actionText: "查看关机" };
+  }
+  if (device.status === "online" && ["executing", "submitted"].includes(device.shutdownPlan?.state)) {
+    return { statusKey: "shutting_down", statusText: "关机中", actionText: "查看状态" };
+  }
   if (device.operation === "waking") {
     return { statusKey: "waking", statusText: "开机中", actionText: "再次唤醒" };
   }
@@ -352,6 +373,12 @@ function makeDeviceTab(device) {
 function confirmDeviceAction() {
   const device = selectedDevice();
   if (!device) return;
+  if (device.capabilities?.includes("shutdown-plan.v1") || device.shutdownPlan?.state === "scheduled") {
+    if (device.status === "online" || device.shutdownPlan?.state === "scheduled") {
+      void showPlanDialog(device);
+      return;
+    }
+  }
   if (device.status === "online") {
     showShutdownCountdown(device);
   } else if (device.operation !== "waking") {
@@ -400,7 +427,7 @@ function confirmRemoveDevice() {
   if (!device) return;
   showConfirm({
     title: `移除“${device.name}”？`,
-    message: "设备凭据将立即失效，重新使用时需要再次绑定。",
+    message: "设备凭据将立即失效，重新使用时需要再次绑定。已接受的关机计划可能继续执行，请先取消关机。",
     submitText: "确认移除",
     action: () => removeDevice(device),
   });
@@ -424,6 +451,8 @@ function clearConfirmDialog() {
     state.confirmTimer = null;
   }
   state.confirmAction = null;
+  state.planDialog = null;
+  if (elements.confirmCancel) { elements.confirmCancel.textContent = "取消"; elements.confirmCancel.disabled = false; }
   if (elements.confirmCountdown) {
     elements.confirmCountdown.hidden = true;
     elements.confirmCountdown.textContent = "";
@@ -431,6 +460,7 @@ function clearConfirmDialog() {
 }
 
 async function runConfirmedAction() {
+  if (state.planDialog) { await sendPlanAction("execute"); return; }
   if (!state.confirmAction) return;
   const action = state.confirmAction;
   state.confirmAction = null;
@@ -608,6 +638,7 @@ async function api(path, options = {}) {
     const error = new Error(payload?.error?.message || `请求失败（${response.status}）`);
     error.status = response.status;
     error.code = payload?.error?.code;
+    error.payload = payload;
     throw error;
   }
   return payload;
@@ -627,5 +658,206 @@ function writeSelectedDevice(value) {
     else window.localStorage.removeItem("wollet.selectedDeviceId");
   } catch {
     // Selection persistence is optional; the app remains fully functional.
+  }
+}
+
+// A monotonic display estimate only. The client service owns the execution deadline.
+function observePlan(device) {
+  device.planObserved = performance.now();
+  device.planRemaining = Math.max(0, new Date(device.shutdownPlan?.estimatedExecuteAt).getTime() - new Date(device.serverTime).getTime());
+}
+
+function newRequestId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 15) | 64;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const hex = Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
+
+async function showPlanDialog(device) {
+  const active = ["scheduled", "executing", "submitted"].includes(device.shutdownPlan?.state);
+  const unknown = ["pending", "outcome_unknown"].includes(device.shutdownRequest?.status);
+  const operationId = active ? device.shutdownPlan.operationId : unknown ? device.shutdownRequest.operationId : newRequestId();
+  showConfirm({title: `关闭“${device.name}”`, message: "正在向客户端创建关机计划…", submitText: "立即关机"});
+  const dialog = state.planDialog = {deviceId: device.id, operationId, creating: !active && !unknown, busy: false, active: false, querying: false};
+  state.confirmTimer = window.setInterval(() => {
+    updatePlanDialog();
+    if (dialog === state.planDialog && !dialog.creating && !dialog.busy && !dialog.querying && performance.now() - (dialog.lastQuery || 0) > 2000) void queryPlan(dialog);
+  }, 100);
+  updatePlanDialog();
+  if (!active && !unknown) {
+    try {
+      const payload = await api(`/api/v1/devices/${encodeURIComponent(device.id)}/shutdown-plans`, {method: "POST", body: {operationId}});
+      applyPlanResponse(dialog, payload);
+    } catch (error) {
+      if (error.payload?.request) applyPlanResponse(dialog, error.payload);
+      else dialog.error = error.message || "创建结果未确认，正在查询";
+    } finally { dialog.creating = false; updatePlanDialog(); }
+  }
+}
+
+function applyPlanResponse(dialog, payload) {
+  const device = state.devices.find(item => item.id === dialog.deviceId);
+  if (!device) return;
+  const old = device.shutdownPlan;
+  if (payload.plan && (!old || old.operationId !== payload.plan.operationId || payload.plan.revision >= old.revision)) {
+    device.shutdownPlan = payload.plan;
+    device.serverTime = payload.serverTime;
+    observePlan(device);
+  }
+  device.shutdownRequest = payload.request;
+  const unknown = ["pending", "outcome_unknown"].includes(payload.request?.status);
+  dialog.error = payload.request?.status === "rejected" ? `操作未成功（${payload.request.code || "客户端拒绝"}）` : unknown ? "操作结果尚未确认，正在查询；客户端可能仍会关机。" : null;
+  if (dialog.pendingRequest?.requestId === payload.request?.requestId && !unknown) dialog.pendingRequest = null;
+  render();
+  updatePlanDialog();
+}
+
+async function queryPlan(dialog) {
+  dialog.querying = true;
+  dialog.lastQuery = performance.now();
+  try {
+    const suffix = dialog.requestId ? `?requestId=${encodeURIComponent(dialog.requestId)}` : "";
+    const payload = await api(`/api/v1/devices/${encodeURIComponent(dialog.deviceId)}/shutdown-plans/${dialog.operationId}${suffix}`);
+    applyPlanResponse(dialog, payload);
+  } catch (error) {
+    if (error.status !== 404) dialog.error = "状态未同步，正在重新查询";
+  } finally { dialog.querying = false; }
+}
+
+function updatePlanDialog() {
+  const dialog = state.planDialog;
+  if (!dialog) return;
+  const device = state.devices.find(item => item.id === dialog.deviceId);
+  const plan = device?.shutdownPlan?.operationId === dialog.operationId ? device.shutdownPlan : null;
+  const fresh = plan?.synchronized && performance.now() - device.planObserved < 3000;
+  dialog.active = plan?.state === "scheduled";
+  elements.confirmCancel.textContent = dialog.active ? "取消关机" : "关闭";
+  elements.confirmCancel.disabled = dialog.busy;
+  elements.confirmSubmit.disabled = dialog.busy || !dialog.active || !fresh;
+  elements.confirmCountdown.hidden = !dialog.active;
+  if (dialog.active) {
+    const remaining = Math.max(0, Math.ceil((device.planRemaining - (performance.now() - device.planObserved)) / 1000));
+    elements.confirmCountdown.textContent = fresh && remaining > 0 ? `${remaining} 秒` : "等待客户端状态";
+    elements.confirmMessage.textContent = dialog.error || (fresh ? "客户端正在倒计时。关闭此页面后仍会按时关机。" : "状态未同步，客户端可能仍会关机；可尝试取消或在客户端操作。");
+  } else {
+    elements.confirmMessage.textContent = dialog.error || ({executing: "客户端正在执行关机", submitted: "关机请求已提交给系统，等待设备离线", cancelled: "关机已取消", failed: "关机失败，请检查客户端", indeterminate: "执行结果无法确定，请检查客户端"}[plan?.state]) || "请求结果尚未确认，正在查询；请勿重复创建计划。";
+  }
+}
+
+async function sendPlanAction(action) {
+  const dialog = state.planDialog;
+  if (!dialog || dialog.busy) return;
+  const device = state.devices.find(item => item.id === dialog.deviceId);
+  const plan = device?.shutdownPlan;
+  if (plan?.operationId !== dialog.operationId || plan.state !== "scheduled") return;
+  if (dialog.pendingRequest && dialog.pendingRequest.action !== action) {
+    dialog.error = "上次操作结果尚未确认，请等待查询结果或在客户端操作。";
+    updatePlanDialog();
+    return;
+  }
+  dialog.busy = true;
+  dialog.pendingRequest ||= {action, requestId: newRequestId(), revision: plan.revision};
+  dialog.requestId = dialog.pendingRequest.requestId;
+  updatePlanDialog();
+  try {
+    const payload = await api(`/api/v1/devices/${encodeURIComponent(dialog.deviceId)}/shutdown-plans/${dialog.operationId}/${action}`, {
+      method: "POST", body: {requestId: dialog.requestId, expectedRevision: dialog.pendingRequest.revision},
+    });
+    applyPlanResponse(dialog, payload);
+  } catch (error) {
+    if (error.payload?.request) applyPlanResponse(dialog, error.payload);
+    else dialog.error = error.message || "操作结果未确认，正在查询";
+  } finally { dialog.busy = false; updatePlanDialog(); }
+}
+
+let compatibilityKey = "";
+let compatibilityTimer;
+function closeCompatibilityHint() {
+  window.clearTimeout(compatibilityTimer);
+  document.querySelector("#compatibility-details").hidden = true;
+  document.querySelector("#compatibility-badge").setAttribute("aria-expanded", "false");
+}
+function openCompatibilityHint() {
+  const badge = document.querySelector("#compatibility-badge");
+  if (badge.hidden) return;
+  window.clearTimeout(compatibilityTimer);
+  const panel = document.querySelector("#compatibility-details");
+  panel.hidden = false;
+  badge.setAttribute("aria-expanded", "true");
+  const bounds = badge.getBoundingClientRect();
+  panel.style.left = `${Math.max(12, Math.min(bounds.left, innerWidth - panel.offsetWidth - 12))}px`;
+  panel.style.top = `${Math.max(12, Math.min(bounds.bottom + 8, innerHeight - panel.offsetHeight - 12))}px`;
+}
+function bindCompatibilityHint() {
+  const badge = document.querySelector("#compatibility-badge");
+  const panel = document.querySelector("#compatibility-details");
+  for (const node of [badge, panel]) {
+    node.addEventListener("mouseenter", openCompatibilityHint);
+    node.addEventListener("mouseleave", () => {
+      compatibilityTimer = window.setTimeout(() => {
+        if (!panel.contains(document.activeElement) && document.activeElement !== badge) closeCompatibilityHint();
+      }, 200);
+    });
+    node.addEventListener("focusout", () => {
+      window.setTimeout(() => {
+        if (!panel.contains(document.activeElement) && document.activeElement !== badge) closeCompatibilityHint();
+      }, 0);
+    });
+  }
+  badge.addEventListener("focus", openCompatibilityHint);
+  badge.addEventListener("click", openCompatibilityHint);
+  document.addEventListener("keydown", event => { if (event.key === "Escape") closeCompatibilityHint(); });
+  document.addEventListener("pointerdown", event => {
+    if (!panel.contains(event.target) && !badge.contains(event.target)) closeCompatibilityHint();
+  });
+  window.addEventListener("resize", () => { if (!panel.hidden) openCompatibilityHint(); });
+  window.addEventListener("scroll", () => { if (!panel.hidden) openCompatibilityHint(); });
+}
+function renderCompatibility(device) {
+  const result = device?.compatibility;
+  const key = JSON.stringify([device?.id, result]);
+  if (key === compatibilityKey) return;
+  compatibilityKey = key;
+  closeCompatibilityHint();
+  const badge = document.querySelector("#compatibility-badge");
+  const panel = document.querySelector("#compatibility-details");
+  document.querySelector("#client-version").textContent = device ? `客户端 ${result?.clientVersion || "版本未知"}${result?.historical ? " · 上次连接" : ""}` : "";
+  badge.textContent = result?.label || "";
+  badge.hidden = !result?.label;
+  panel.replaceChildren();
+  if (!result) return;
+  function paragraph(text) { const p = document.createElement("p"); p.textContent = text; panel.append(p); }
+  paragraph(`客户端 ${result.clientVersion} · 服务端 ${result.serverVersion}`);
+  paragraph(result.detail);
+  const missing = result.missing || [];
+  if (!missing.length) return;
+  const list = document.createElement("ul");
+  missing.forEach(feature => {
+    const item = document.createElement("li");
+    item.textContent = `${feature.name}：${feature.component === "client" ? "客户端" : "服务端"}未支持`;
+    list.append(item);
+  });
+  panel.append(list);
+  const targets = [...new Set(missing.map(feature => feature.target).filter(Boolean))];
+  if (targets.length) paragraph(`支持这些功能的参考版本：${targets.join("、")}`);
+  const heading = document.createElement("h3");
+  heading.textContent = "如何更新";
+  panel.append(heading);
+  if (missing.some(feature => feature.component === "client")) {
+    paragraph("客户端：下载新版 Windows 客户端，运行后选择“更新／修复”。无需先卸载，现有配对会保留。");
+  }
+  if (missing.some(feature => feature.component === "server")) {
+    paragraph("服务端：由管理员按发布说明更新 Docker 镜像或服务端程序，再重新连接客户端。");
+  }
+  const releases = document.createElement("a");
+  releases.href = "https://github.com/fishy-stick/wollet/releases";
+  releases.target = "_blank";
+  releases.rel = "noopener noreferrer";
+  releases.textContent = "前往 GitHub Releases 下载更新 ↗";
+  panel.append(releases);
+  if (targets.some(version => version.includes("-"))) {
+    paragraph("参考版本包含测试版；若发布页尚未提供，请使用对应测试构建或等待正式发布。");
   }
 }

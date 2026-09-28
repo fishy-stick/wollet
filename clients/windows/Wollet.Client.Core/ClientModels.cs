@@ -12,7 +12,10 @@ public sealed record DeviceSnapshot(
     string MacAddress,
     string Status,
     DateTimeOffset? LastSeenAt,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    CompatibilityResult? Compatibility = null,
+    string? ServerVersion = null,
+    string[]? ServerCapabilities = null);
 
 public sealed class WolletApiException : Exception
 {

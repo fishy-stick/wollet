@@ -56,6 +56,7 @@
       <p id="device-status" class="device-focus__status"></p>
       <p id="device-meta" class="device-focus__meta"></p>
       <p id="device-activity" class="device-focus__activity"></p>
+      <div class="compatibility-line"><span id="client-version"></span><button id="compatibility-badge" class="compatibility-badge" type="button" aria-expanded="false" aria-controls="compatibility-details" hidden></button><div id="compatibility-details" class="compatibility-details" role="region" aria-label="版本与功能差异" hidden></div></div>
       <button id="device-action" class="device-action" type="button">
         <svg class="device-action__icon" viewBox="0 0 96 96" aria-hidden="true">
           <path d="M48 14v36M28 31a32 32 0 1 0 40 0" />
@@ -73,6 +74,7 @@
     <footer class="device-footer">
       <div id="device-rail" class="device-rail" role="tablist" aria-label="选择设备"></div>
     </footer>
+    <small id="server-version" class="server-version"></small>
 
     <button id="remove-device" class="remove-device" type="button">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>

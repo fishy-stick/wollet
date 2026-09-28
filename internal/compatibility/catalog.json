@@ -1,0 +1,17 @@
+{
+  "features": [
+    {"id":"remote-control","name":"基础远程开关机","client":["protocol.v1"],"server":["protocol.v1"]},
+    {"id":"desktop-countdown","name":"关机倒计时","client":["shutdown-plan.v1"],"server":["shutdown-plan.v1"]},
+    {"id":"preserved-pairing","name":"更新保留配对","client":["pairing-preserved.v1"],"server":[]}
+  ],
+  "profiles": {
+    "legacy":{"client":["protocol.v1"],"server":["protocol.v1"]},
+    "updater":{"client":["protocol.v1","pairing-preserved.v1"],"server":["protocol.v1"]},
+    "plans":{"client":["protocol.v1","pairing-preserved.v1","shutdown-plan.v1"],"server":["protocol.v1","shutdown-plan.v1"]}
+  },
+  "versions": [
+    {"version":"1.0.4","profile":"legacy","order":104},
+    {"version":"1.1.0","profile":"plans","order":110}
+  ],
+  "currentProfile":"plans"
+}

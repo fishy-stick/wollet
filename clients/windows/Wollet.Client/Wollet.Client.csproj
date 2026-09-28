@@ -12,6 +12,7 @@
     <AssemblyName>wollet-client</AssemblyName>
     <Product>Wollet Client</Product>
     <Description>Wollet Windows Client</Description>
+    <InformationalVersion Condition="'$(Version)' == ''">unknown</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
