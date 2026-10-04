@@ -131,7 +131,7 @@ Compose 默认使用 `ghcr.io/fishy-stick/wollet:latest`，数据库保存在 `.
 
 下载新版单文件客户端，双击运行并允许安装管理窗口提权。窗口显示已安装版本和当前程序版本：当前程序较新时提供“更新”，版本相同时提供“修复”，较旧或版本无法比较时禁止覆盖。
 
-版本比较支持开发版与候选版，例如 `1.1.0-dev.2 < 1.1.0-dev.10 < 1.1.0-rc.1 < 1.1.0`；`+` 后的构建信息不影响排序。
+版本比较支持开发版与候选版，例如 `1.2.0-dev.1 < 1.2.0-rc.1 < 1.2.0`；`+` 后的构建信息不影响排序。
 
 检测到本地绑定配置后，点击“更新”或“修复”即可保留原配对，无需填写 Token。更新不依赖服务端在线验证；后台服务启动后会尝试重新连接。凭据已失效时仍需通过“绑定／更换服务端”使用新 Token 绑定。
 
@@ -193,7 +193,7 @@ Windows 客户端的绑定、状态检查和后台连接均直连服务端，不
 
 ## 从源码开发
 
-服务端需要 Go 1.26。管理页面使用原生 HTML、CSS 和 JavaScript，并嵌入 Go 二进制，不需要单独的前端工具链。Windows 客户端使用 C#、.NET 10 和 WinForms。
+服务端需要 Go 1.26。管理页面使用原生 HTML、CSS 和 JavaScript，并嵌入 Go 二进制，不需要单独的前端工具链。Windows 客户端使用 C#、.NET 10 和 WPF。应用层不依赖 UI 框架，后台服务负责关机计时，桌面窗口只展示状态和提交本地操作。
 
 ### 服务端
 
@@ -216,10 +216,10 @@ go build -o wollet-sim ./cmd/wollet-sim
 本地构建 Docker 镜像时，请显式传入本次构建的版本号，例如：
 
 ```bash
-docker build --build-arg VERSION=1.1.0-dev.4 -t wollet:local .
+docker build --build-arg VERSION=1.2.0-dev.1 -t wollet:local .
 ```
 
-`1.1.0-dev.4` 仅为示例，按实际构建递增编号；镜像标签 `local` 不会自动成为程序版本。未传入 `VERSION` 时，服务端报告 `unknown`，页面和客户端会显示“版本未知”，刷新无法补出版本号。重建后需重新创建服务端容器才会生效。直接使用 `go build` 时可通过 `-ldflags="-X github.com/fishy-stick/wollet/internal/compatibility.Version=1.1.0-dev.4"` 注入版本。
+`1.2.0-dev.1` 是首个计划发布的测试版本；后续公开测试版再递增 `dev.N`。镜像标签 `local` 不会自动成为程序版本。未传入 `VERSION` 时，服务端报告 `unknown`，页面和客户端会显示“版本未知”，刷新无法补出版本号。重建后需重新创建服务端容器才会生效。直接使用 `go build` 时可通过 `-ldflags="-X github.com/fishy-stick/wollet/internal/compatibility.Version=1.2.0-dev.1"` 注入版本。
 
 ### 模拟客户端
 
@@ -244,6 +244,7 @@ docker build --build-arg VERSION=1.1.0-dev.4 -t wollet:local .
 dotnet restore clients/windows/Wollet.Windows.slnx
 dotnet build clients/windows/Wollet.Client/Wollet.Client.csproj --no-restore
 dotnet test --project clients/windows/Wollet.Client.Core.Tests/Wollet.Client.Core.Tests.csproj --no-restore
+dotnet test --project clients/windows/Wollet.Client.Windows.Tests/Wollet.Client.Windows.Tests.csproj --no-restore
 ```
 
 发布包含 .NET Runtime 的单文件客户端：
@@ -258,26 +259,26 @@ dotnet publish clients/windows/Wollet.Client/Wollet.Client.csproj \
 本地测试构建可显式指定预发布版本，每轮测试递增 `dev.N`：
 
 ```powershell
-dotnet publish clients/windows/Wollet.Client/Wollet.Client.csproj -p:PublishProfile=win-x64 -p:Version=1.1.0-dev.1
+dotnet publish clients/windows/Wollet.Client/Wollet.Client.csproj -p:PublishProfile=win-x64 -p:Version=1.2.0-dev.1
 ```
 
-同一测试版本可通过“修复”重新安装。若已经安装 `1.1.0` 正式版，`1.1.0-dev.N` 会被视为旧版并阻止覆盖。本地构建无需打 tag。
+同一测试版本可通过“修复”重新安装。若已经安装 `1.2.0` 正式版，`1.2.0-dev.N` 会被视为旧版并阻止覆盖。本地构建无需打 tag。
 
 ### 发布与部署测试版
 
 提交需要测试的代码后，在该提交上创建并推送递增的测试 tag，例如：
 
 ```sh
-git tag v1.1.0-dev.3
-git push origin v1.1.0-dev.3
+git tag v1.2.0-dev.1
+git push origin v1.2.0-dev.1
 ```
 
-`Release` 工作流先校验 tag 的语义版本，再构建 Linux amd64／arm64 镜像和两种 Windows 客户端。带预发布标识的 tag（如 `dev.N`、`rc.N`）创建 GitHub Pre-release，不标为 Latest；镜像仅发布完整版本标签，例如 `v1.1.0-dev.3` 和 `1.1.0-dev.3`，不更新 `latest`、`1` 或 `1.1`。正式 tag（如 `v1.1.0`）沿用正式发布流程。
+`Release` 工作流先校验 tag 的语义版本，再构建 Linux amd64／arm64 镜像和两种 Windows 客户端。带预发布标识的 tag（如 `dev.N`、`rc.N`）创建 GitHub Pre-release，不标为 Latest；首个测试版使用 `v1.2.0-dev.1` 和 `1.2.0-dev.1`，不更新 `latest`、`1` 或 `1.2`。正式 tag（如 `v1.2.0`）沿用正式发布流程。
 
 等待 `Publish Docker image` 成功后，在服务端部署目录的 `.env` 中指定测试镜像：
 
 ```dotenv
-WOLLET_IMAGE=ghcr.io/fishy-stick/wollet:v1.1.0-dev.3
+WOLLET_IMAGE=ghcr.io/fishy-stick/wollet:v1.2.0-dev.1
 ```
 
 然后执行：
@@ -298,6 +299,7 @@ go test -race ./...
 go vet ./...
 node --test internal/webui/tests/*.test.cjs
 dotnet test --project clients/windows/Wollet.Client.Core.Tests/Wollet.Client.Core.Tests.csproj
+dotnet test --project clients/windows/Wollet.Client.Windows.Tests/Wollet.Client.Windows.Tests.csproj
 ```
 
 网页计时测试使用 Node.js 内置测试运行器，仅开发测试需要 Node.js；构建与部署服务端仍不需要前端工具链。
@@ -321,3 +323,5 @@ dotnet test --project clients/windows/Wollet.Client.Core.Tests/Wollet.Client.Cor
 REST API、SSE 事件、客户端认证及 WebSocket 消息格式见 [docs/protocol.md](docs/protocol.md)。
 
 后续开发需求与待讨论事项见 [开发规划](docs/development-plan.md)。
+
+Windows WPF 客户端的架构、测试结果及 Windows 10／11 验收范围见 [WPF 迁移记录](docs/design/wpf-migration.md)。

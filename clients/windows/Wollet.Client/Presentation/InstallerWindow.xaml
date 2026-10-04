@@ -1,0 +1,63 @@
+<Window x:Class="Wollet.Client.InstallerWindow" x:ClassModifier="internal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Wollet.Client"
+        Style="{StaticResource {x:Type Window}}"
+        Title="Wollet · 客户端管理" Width="600" Height="700" MinWidth="440" MinHeight="360"
+        WindowStartupLocation="CenterScreen" AutomationProperties.Name="Wollet 客户端管理">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="28,24">
+            <TextBlock Text="Wollet" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
+            <TextBlock Text="客户端管理" FontSize="26" FontWeight="SemiBold" Margin="0,6,0,18" />
+            <TextBlock Text="{Binding Versions}" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding Introduction}" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,22" />
+            <Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,22">
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,6">
+                        <Button DockPanel.Dock="Right" Content="刷新状态" Style="{StaticResource LinkButton}" Command="{Binding RefreshCommand}" AutomationProperties.Name="刷新状态" />
+                        <TextBlock Text="运行状态" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    </DockPanel>
+                    <TextBlock Text="{Binding ConnectionStatus}" AutomationProperties.LiveSetting="Polite">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ConnectionTone}" Value="Error"><Setter Property="Foreground" Value="{DynamicResource DangerBrush}" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding ConnectionTone}" Value="Success"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" /></DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <local:CompatibilityHint Presentation="{Binding Compatibility}" Margin="0,8,0,0" />
+                </StackPanel>
+            </Border>
+            <StackPanel Visibility="{Binding ShowBindingFields, Converter={StaticResource BoolVisibility}}" IsEnabled="{Binding InputsEnabled}">
+                <Label Content="服务端地址" Target="{Binding ElementName=ServerInput}" Padding="0" Margin="0,0,0,6" />
+                <TextBox x:Name="ServerInput" Text="{Binding ServerAddress, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="服务端地址" AutomationProperties.HelpText="例如 192.168.1.10:8080" />
+                <TextBlock Text="例如 192.168.1.10:8080" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,16" />
+                <Label Content="绑定 Token" Target="{Binding ElementName=TokenInput}" Padding="0" Margin="0,0,0,6" />
+                <TextBox x:Name="TokenInput" Text="{Binding TokenText, UpdateSourceTrigger=PropertyChanged}" CharacterCasing="Upper" AutomationProperties.Name="绑定 Token" AutomationProperties.HelpText="{Binding TokenHint}" />
+                <TextBlock Text="{Binding TokenHint}" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,22" />
+            </StackPanel>
+            <WrapPanel HorizontalAlignment="Right">
+                <Button Content="卸载客户端" Command="{Binding UninstallCommand}" Style="{StaticResource DangerButton}" Margin="0,0,8,8" />
+                <Button Content="{Binding InstallText}" Command="{Binding InstallCommand}" IsDefault="{Binding InstallIsDefault}"
+                        Visibility="{Binding ShowBindingFields, Converter={StaticResource BoolVisibility}}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8" />
+                <Button Content="{Binding UpdateText}" Command="{Binding UpdateCommand}" IsDefault="{Binding UpdateIsDefault}"
+                        Visibility="{Binding ShowUpdate, Converter={StaticResource BoolVisibility}}" Style="{StaticResource PrimaryButton}" Margin="0,0,0,8" />
+            </WrapPanel>
+            <TextBlock Text="{Binding OperationStatus}" Margin="0,10,0,0" AutomationProperties.LiveSetting="Polite">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                        <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding OperationStatus}" Value=""><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                            <DataTrigger Binding="{Binding OperationTone}" Value="Error"><Setter Property="Foreground" Value="{DynamicResource DangerBrush}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding OperationTone}" Value="Success"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" /></DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </StackPanel>
+    </ScrollViewer>
+</Window>

@@ -108,6 +108,9 @@ jobs:
       - name: Test
         run: dotnet test --project clients/windows/Wollet.Client.Core.Tests/Wollet.Client.Core.Tests.csproj --configuration Release --no-restore
 
+      - name: Test WPF windows
+        run: dotnet test --project clients/windows/Wollet.Client.Windows.Tests/Wollet.Client.Windows.Tests.csproj --configuration Release --no-restore
+
       - name: Publish client with .NET Runtime
         run: >-
           dotnet publish clients/windows/Wollet.Client/Wollet.Client.csproj

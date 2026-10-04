@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>embedded</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Wollet.Client.Core/Wollet.Client.Core.csproj" />
+    <InternalsVisibleTo Include="wollet-client" />
+    <InternalsVisibleTo Include="Wollet.Client.Core.Tests" />
+    <InternalsVisibleTo Include="Wollet.Client.Windows.Tests" />
+  </ItemGroup>
+</Project>

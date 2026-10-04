@@ -9,8 +9,7 @@
 
   <ItemGroup>
     <None Include="../../../internal/compatibility/fixtures.json" Link="compatibility-fixtures.json" CopyToOutputDirectory="PreserveNewest" />
-    <Compile Include="../Wollet.Client/InstallCoordinator.cs" Link="InstallCoordinator.cs" />
-    <Compile Include="../Wollet.Client/InstallationServices.cs" Link="InstallationServices.cs" />
+    <ProjectReference Include="../Wollet.Client.Application/Wollet.Client.Application.csproj" />
     <Compile Include="../Wollet.Client/DesktopPlanServer.cs" Link="DesktopPlanServer.cs" />
     <Compile Include="../Wollet.Client/DesktopServiceIdentity.cs" Link="DesktopServiceIdentity.cs" />
     <Compile Include="../Wollet.Client/DesktopPlanClient.cs" Link="DesktopPlanClient.cs" />

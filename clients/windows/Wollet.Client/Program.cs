@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Principal;
+using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.WindowsServices;
@@ -10,21 +11,27 @@ namespace Wollet.Client;
 internal static class Program
 {
     [STAThread]
-    private static async Task Main(string[] args)
+    private static void Main(string[] args)
     {
         var serviceMode = args.Contains("--service", StringComparer.OrdinalIgnoreCase) ||
                           WindowsServiceHelpers.IsWindowsService();
         if (serviceMode)
         {
-            await RunServiceAsync(args);
+            RunServiceAsync(args).GetAwaiter().GetResult();
             return;
         }
 
-        ApplicationConfiguration.Initialize();
         if (args.Contains("--desktop", StringComparer.OrdinalIgnoreCase))
         {
             using var desktopMutex = DesktopLifetime.Acquire(out var first);
-            if (first) Application.Run(new DesktopPlanContext());
+            if (first)
+            {
+                var application = new UiApplication(ShutdownMode.OnExplicitShutdown);
+                using var desktop = new DesktopPresentation(application);
+                application.Startup += async (_, _) => await desktop.StartAsync();
+                application.SessionEnding += (_, _) => desktop.Dispose();
+                application.Run();
+            }
             return;
         }
         using var identity = WindowsIdentity.GetCurrent();
@@ -47,7 +54,7 @@ internal static class Program
         catch (AbandonedMutexException) { ownsMutex = true; }
         if (!ownsMutex)
         {
-            MessageBox.Show("已有客户端管理窗口正在运行，请关闭后重试。", "Wollet", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("已有客户端管理窗口正在运行，请关闭后重试。", "Wollet", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
         var paths = new WindowsPaths();
@@ -63,7 +70,13 @@ internal static class Program
             new WindowsServiceInstaller(paths),
             deviceInfoProvider,
             new WolletApiClient(httpClient), new DesktopCompatibilityReader());
-        try { Application.Run(new InstallerForm(coordinator)); }
+        try
+        {
+            var application = new UiApplication(ShutdownMode.OnMainWindowClose);
+            var window = new InstallerWindow(coordinator);
+            application.SessionEnding += (_, _) => window.EndSession();
+            application.Run(window);
+        }
         finally { installerMutex.ReleaseMutex(); }
         if (!args.Contains("--elevated-installer", StringComparer.OrdinalIgnoreCase)) TryStartDesktop();
     }
