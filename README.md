@@ -6,6 +6,7 @@
 
 **在浏览器中唤醒与安全关闭局域网内的 Windows 电脑**
 
+[![CI](https://github.com/fishy-stick/wollet/actions/workflows/ci.yml/badge.svg)](https://github.com/fishy-stick/wollet/actions/workflows/ci.yml)
 [![Release](https://github.com/fishy-stick/wollet/actions/workflows/release.yml/badge.svg)](https://github.com/fishy-stick/wollet/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/fishy-stick/wollet?display_name=tag&style=flat-square)](https://github.com/fishy-stick/wollet/releases/latest)
 [![Container](https://img.shields.io/badge/container-ghcr.io%2Ffishy--stick%2Fwollet-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/fishy-stick/wollet/pkgs/container/wollet)
@@ -274,7 +275,9 @@ git tag $releaseTag
 git push origin $releaseTag
 ```
 
-`Release` 工作流先校验 tag 的语义版本，再构建 Linux amd64／arm64 镜像和两种 Windows 客户端。带预发布标识的 tag（如 `v1.2.0-dev.N`、`v1.2.0-rc.N`）创建 GitHub Pre-release，不标为 Latest，也不更新 `latest` 或主／次版本镜像别名。正式 tag（如 `v1.2.0`）创建正式 Release，并更新对应镜像别名。
+发布前，将版本发布说明提交到 `docs/releases/<tag>-notes.md`，例如 `docs/releases/v1.2.0-notes.md`。正式版必须存在对应的非空说明，否则工作流在构建和发布前失败。GitHub Release 正文使用该文件内容，并附加客户端下载与镜像说明；不再混入自动生成的提交记录。预发布版优先读取自己的说明文件，缺少时回退到下载说明和自动生成的提交记录。
+
+`Release` 工作流先校验 tag 的语义版本和发布说明，并执行与合并前相同的完整 CI；全部通过后才构建 Linux amd64／arm64 镜像和两种 Windows 客户端。带预发布标识的 tag（如 `v1.2.0-dev.N`、`v1.2.0-rc.N`）创建 GitHub Pre-release，不标为 Latest，也不更新 `latest` 或主／次版本镜像别名。正式 tag（如 `v1.2.0`）创建正式 Release，并更新对应镜像别名。
 
 等待 `Publish Docker image` 成功后，在服务端部署目录的 `.env` 中指定实际发布的镜像；以下 tag 仅为示例：
 
@@ -293,6 +296,8 @@ docker compose logs -f wollet
 Windows 客户端可在对应的 GitHub Release 附件中下载。已发布版本、附件和发布时间以 [GitHub Releases](https://github.com/fishy-stick/wollet/releases) 为准。发布前需核对功能目录中的正式版本映射，已发布 tag 不重复使用。
 
 ### 测试
+
+`CI` 工作流在 Pull Request 和分支推送时运行 Go 测试（含 race detector）、`go vet`、网页测试，以及 .NET Core／Windows 两组测试，分别显示检查结果。tag 发布通过复用同一工作流执行这些检查。
 
 ```bash
 go test ./...

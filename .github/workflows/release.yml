@@ -14,15 +14,25 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  checks:
+    name: Release checks
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   release-info:
-    name: Validate release version
+    name: Validate release version and notes
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
+      notes-file: ${{ steps.version.outputs.notes-file }}
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
       - name: Parse tag
         id: version
         shell: pwsh
@@ -33,12 +43,23 @@ jobs:
           if ($version -notmatch '\A\d+\.\d+\.\d+(?:[-+]|\z)') { throw "Release tag must include major.minor.patch" }
           $parsed = [System.Management.Automation.SemanticVersion]::Parse($version)
           $prerelease = -not [string]::IsNullOrEmpty($parsed.PreReleaseLabel)
+          $notesFile = "docs/releases/$tag-notes.md"
+          if (Test-Path -LiteralPath $notesFile -PathType Leaf) {
+            if ([string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $notesFile -Raw))) {
+              throw "Release notes must not be empty: $notesFile"
+            }
+          } elseif ($prerelease) {
+            $notesFile = ''
+          } else {
+            throw "Stable releases require versioned release notes: $notesFile"
+          }
           "version=$version" >> $env:GITHUB_OUTPUT
           "prerelease=$($prerelease.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "notes-file=$notesFile" >> $env:GITHUB_OUTPUT
 
   publish-image:
     name: Publish Docker image
-    needs: release-info
+    needs: [release-info, checks]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -85,7 +106,7 @@ jobs:
 
   build-windows-client:
     name: Build Windows clients
-    needs: release-info
+    needs: [release-info, checks]
     runs-on: windows-latest
     permissions:
       contents: read
@@ -104,12 +125,6 @@ jobs:
 
       - name: Restore
         run: dotnet restore clients/windows/Wollet.Windows.slnx
-
-      - name: Test
-        run: dotnet test --project clients/windows/Wollet.Client.Core.Tests/Wollet.Client.Core.Tests.csproj --configuration Release --no-restore
-
-      - name: Test WPF windows
-        run: dotnet test --project clients/windows/Wollet.Client.Windows.Tests/Wollet.Client.Windows.Tests.csproj --configuration Release --no-restore
 
       - name: Publish client with .NET Runtime
         run: >-
@@ -162,6 +177,9 @@ jobs:
       contents: write
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
       - name: Download Windows clients
         uses: actions/download-artifact@v8
         with:
@@ -174,7 +192,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           IS_PRERELEASE: ${{ needs.release-info.outputs.prerelease }}
-          RELEASE_NOTES: |
+          RELEASE_NOTES_FILE: ${{ needs.release-info.outputs.notes-file }}
+          DOWNLOAD_NOTES: |
             ## Windows 客户端
 
             **如果你不知道该下载哪个版本，请选择 `wollet-client-win-x64-runtime.exe`。**
@@ -190,13 +209,27 @@ jobs:
             ```
         run: |
           $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
-          Set-Content -LiteralPath $notesPath -Value $env:RELEASE_NOTES -Encoding utf8
+          $notes = $env:DOWNLOAD_NOTES
+          if (-not [string]::IsNullOrEmpty($env:RELEASE_NOTES_FILE)) {
+            $versionNotes = Get-Content -LiteralPath $env:RELEASE_NOTES_FILE -Raw
+            # Resolve repository-relative Markdown links against the released tag.
+            $notesBase = [uri]"https://github.com/$env:GH_REPO/blob/$([uri]::EscapeDataString($env:GITHUB_REF_NAME))/$env:RELEASE_NOTES_FILE"
+            $versionNotes = [regex]::Replace($versionNotes, '(?<=\]\()(?!(?:[A-Za-z][A-Za-z0-9+.-]*:|/|#))[^)\s]+(?=\))', {
+              param($match)
+              [uri]::new($notesBase, $match.Value).AbsoluteUri
+            })
+            $notes = $versionNotes.TrimEnd() + "`n`n" + $notes
+          }
+          Set-Content -LiteralPath $notesPath -Value $notes -Encoding utf8
           $assets = @(Get-ChildItem -LiteralPath dist -Filter '*.exe' -File | ForEach-Object FullName)
           if ($assets.Count -ne 2) { throw "Expected two Windows release assets" }
           $releaseArgs = @('release', 'create', $env:GITHUB_REF_NAME) + $assets + @(
             '--verify-tag', '--title', "Wollet $env:GITHUB_REF_NAME",
-            '--generate-notes', '--notes-file', $notesPath
+            '--notes-file', $notesPath
           )
+          if ([string]::IsNullOrEmpty($env:RELEASE_NOTES_FILE)) {
+            $releaseArgs += '--generate-notes'
+          }
           if ($env:IS_PRERELEASE -eq 'true') {
             $releaseArgs += @('--prerelease', '--latest=false')
           }
