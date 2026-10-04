@@ -50,8 +50,14 @@ func TestCompatibilityHandshakeAndHistoricalState(t *testing.T) {
 	}
 	waitFor(t, time.Second, func() bool { return app.hub.IsOnline(id) })
 	result := app.compatibilityView(id)
-	if result.Kind != "limited" || result.Historical || len(result.Missing) != 2 {
+	if result.Kind != "client_upgrade" || result.Historical || len(result.Missing) != 2 {
 		t.Fatalf("online: %+v", result)
+	}
+	for _, missing := range result.Missing {
+		wantTarget := map[string]string{"desktop-countdown": "1.1.0", "device-status": "1.2.0"}[missing.ID]
+		if wantTarget == "" || missing.Component != "client" || missing.Target != wantTarget {
+			t.Fatalf("upgrade target: %+v", missing)
+		}
 	}
 	response := adminRequestForTest(t, host.URL, nil, "GET", "/api/v1/devices", nil)
 	var payload struct {
@@ -61,7 +67,7 @@ func TestCompatibilityHandshakeAndHistoricalState(t *testing.T) {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if len(payload.Devices) != 1 || payload.Devices[0].Compatibility.Kind != "limited" {
+	if len(payload.Devices) != 1 || payload.Devices[0].Compatibility.Kind != "client_upgrade" {
 		t.Fatalf("REST: %+v", payload)
 	}
 	conn.CloseNow()
