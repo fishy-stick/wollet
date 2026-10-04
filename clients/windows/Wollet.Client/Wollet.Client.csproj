@@ -13,6 +13,7 @@
     <Product>Wollet Client</Product>
     <Description>Wollet Windows Client</Description>
     <InformationalVersion Condition="'$(Version)' == ''">unknown</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
