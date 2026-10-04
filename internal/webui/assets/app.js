@@ -143,9 +143,9 @@ async function showApp() {
   void api("/api/v1/server-info").then(info => {
     document.querySelector("#server-version").textContent = `服务端 ${info.version === "unknown" ? "版本未知" : info.version}`;
   }).catch(() => { document.querySelector("#server-version").textContent = "服务端版本未知"; });
-  elements.bootView.hidden = true;
+  elements.bootView.hidden = false;
   elements.loginView.hidden = true;
-  elements.appView.hidden = false;
+  elements.appView.hidden = true;
   elements.logout.hidden = !state.authEnabled;
   try {
     const response = await api("/api/v1/devices");
@@ -156,8 +156,11 @@ async function showApp() {
       showLogin();
       return;
     }
+    render();
     showToast(error.message || "无法读取设备列表");
   }
+  elements.bootView.hidden = true;
+  elements.appView.hidden = false;
 }
 
 async function login(event) {

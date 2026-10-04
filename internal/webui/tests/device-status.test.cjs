@@ -142,3 +142,64 @@ test('fresh server snapshot calibrates page refresh and a new session resets con
     assert.equal(elements.connectionDuration.textContent, '当前在线 0 秒');
     assert.equal(elements.systemUptime.textContent, '系统运行 11 秒');`);
 });
+
+function setupStartup() {
+  const fixture = setup();
+  let resolve, reject;
+  fixture.context.initialSnapshot = new Promise((done, fail) => { resolve = done; reject = fail; });
+  fixture.run(`
+    state.devices = []; state.selectedId = null;
+    elements.bootView = { hidden: false };
+    elements.loginView = { hidden: true };
+    elements.appView.hidden = true;
+    elements.logout = { hidden: false };
+    elements.tokenDialog = { open: false };
+    document.querySelector = () => ({ textContent: '' });
+    api = path => path === '/api/v1/server-info' ? Promise.resolve({ version: 'test' }) : initialSnapshot;
+    let renderedStatus = null, streamOpened = false, startupError = '';
+    render = () => {
+      assert.equal(elements.bootView.hidden, false);
+      assert.equal(elements.appView.hidden, true);
+      renderedStatus = selectedDevice()?.status || 'empty';
+    };
+    openEvents = () => { streamOpened = true; };
+    showToast = message => { startupError = message; };
+  `);
+  return { ...fixture, resolve, reject };
+}
+
+test('startup keeps the loading view until the offline snapshot is rendered', async () => {
+  const { run, resolve } = setupStartup();
+  const request = run('showApp()');
+  run(`assert.equal(elements.bootView.hidden, false);
+    assert.equal(elements.appView.hidden, true);
+    assert.equal(renderedStatus, null);`);
+  resolve({ devices: [{ id: 'device-1', status: 'offline', macAddress: 'A4:83:E7:19:2C:5A' }] });
+  await request;
+  run(`assert.equal(renderedStatus, 'offline');
+    assert.equal(elements.bootView.hidden, true);
+    assert.equal(elements.appView.hidden, false);
+    assert.equal(streamOpened, true);`);
+});
+
+test('an empty startup snapshot renders before the app becomes visible', async () => {
+  const { run, resolve } = setupStartup();
+  const request = run('showApp()');
+  resolve({ devices: [] });
+  await request;
+  run(`assert.equal(renderedStatus, 'empty');
+    assert.equal(elements.bootView.hidden, true);
+    assert.equal(elements.appView.hidden, false);`);
+});
+
+test('startup fetch failure renders a safe view and preserves the error message', async () => {
+  const { run, reject } = setupStartup();
+  const request = run('showApp()');
+  reject(new Error('无法读取设备列表'));
+  await request;
+  run(`assert.equal(renderedStatus, 'empty');
+    assert.equal(elements.bootView.hidden, true);
+    assert.equal(elements.appView.hidden, false);
+    assert.equal(streamOpened, false);
+    assert.equal(startupError, '无法读取设备列表');`);
+});
