@@ -3,6 +3,7 @@ package protocol
 const Version = 1
 
 type ClientMessage struct {
+	DeviceStatus     *DeviceStatus   `json:"deviceStatus,omitempty"`
 	ClientVersion    string          `json:"clientVersion,omitempty"`
 	Capabilities     []string        `json:"capabilities,omitempty"`
 	SessionID        string          `json:"sessionId,omitempty"`

@@ -155,6 +155,14 @@ Windows 客户端的绑定、状态检查和后台连接均直连服务端，不
 
 模拟器默认启用新版协议，`--shutdown-plans=false` 测试旧流程，`--local-cancel-after=3s` 模拟本地取消，`--exit-on-shutdown=false` 保留进程便于检查终态。模拟器不会关闭真实电脑。
 
+### 连接 IP 与运行时长（v1.2.0 开发版）
+
+管理页面新增连接 IP、当前在线时长及系统运行时长。IP 由服务端读取客户端 WebSocket 连接的实际对端地址，局域网直连时就是设备连接所用的 IP；经过 NAT 或反向代理时显示服务端看到的对端地址，不自动采用转发请求头。当前在线从客户端 WebSocket 连接成功开始，页面刷新不重置，断线重连后重新计时。系统运行使用 Windows 内核运行计时，包含睡眠和休眠；快速启动可能保留原时长，完整重启后归零。
+
+旧客户端也可显示 IP 和当前在线，系统运行显示未知。离线时隐藏当前值；状态连接中断或运行时长样本过期时暂停对应计时并显示待同步／待更新。IP 属于当前连接，不随运行时长样本过期。页面提供“时长说明”解释口径，过期样本可查看采样时间。
+
+模拟器默认上报模拟运行时长，IP 同样由服务端采集；`--system-uptime=24h` 指定初始模拟时长，`--device-status=false` 验证旧客户端行为。模拟时长不代表运行模拟器的电脑开机时间。
+
 ## 配置
 
 | 环境变量 | 默认值 | 说明 |
@@ -288,8 +296,11 @@ Windows 客户端可在对应的 GitHub Pre-release 附件中下载。下一轮�
 go test ./...
 go test -race ./...
 go vet ./...
+node --test internal/webui/tests/*.test.cjs
 dotnet test --project clients/windows/Wollet.Client.Core.Tests/Wollet.Client.Core.Tests.csproj
 ```
+
+网页计时测试使用 Node.js 内置测试运行器，仅开发测试需要 Node.js；构建与部署服务端仍不需要前端工具链。
 
 ## 项目结构
 

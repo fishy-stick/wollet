@@ -9,6 +9,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/fishy-stick/wollet/internal/identity"
 	"github.com/fishy-stick/wollet/internal/protocol"
 )
 
@@ -29,11 +30,17 @@ const (
 type ActivityHandler func(deviceID string, activity Activity, at time.Time)
 
 type Connection struct {
-	deviceID string
-	conn     *websocket.Conn
-	writeMu  sync.Mutex
-	done     chan struct{}
-	doneOnce sync.Once
+	id              string
+	connectedAt     time.Time
+	remoteIPAddress *string
+	status          *protocol.DeviceStatus
+	observedAt      time.Time
+	capabilities    []string
+	deviceID        string
+	conn            *websocket.Conn
+	writeMu         sync.Mutex
+	done            chan struct{}
+	doneOnce        sync.Once
 }
 
 func (c *Connection) DeviceID() string      { return c.deviceID }
@@ -82,8 +89,12 @@ func New(offlineAfter time.Duration, logger *slog.Logger, onActivity ActivityHan
 	}
 }
 
-func (h *Hub) Register(deviceID string, conn *websocket.Conn, now time.Time) *Connection {
-	connection := &Connection{deviceID: deviceID, conn: conn, done: make(chan struct{})}
+func (h *Hub) Register(deviceID string, conn *websocket.Conn, now time.Time, remoteIPAddress *string, capabilities ...string) *Connection {
+	id, err := identity.NewUUID()
+	if err != nil {
+		panic(err)
+	}
+	connection := &Connection{id: id, connectedAt: now, remoteIPAddress: remoteIPAddress, deviceID: deviceID, conn: conn, done: make(chan struct{}), capabilities: append([]string(nil), capabilities...)}
 	h.mu.Lock()
 	old := h.connections[deviceID]
 	h.connections[deviceID] = connection
@@ -117,10 +128,19 @@ func (h *Hub) Unregister(connection *Connection, now time.Time) {
 }
 
 func (h *Hub) Heartbeat(connection *Connection, now time.Time) bool {
+	return h.HeartbeatStatus(connection, nil, now)
+}
+
+func (h *Hub) HeartbeatStatus(connection *Connection, status *protocol.DeviceStatus, now time.Time) bool {
 	h.mu.Lock()
 	current, ok := h.connections[connection.deviceID]
 	if ok && current == connection {
 		h.lastHeartbeat[connection.deviceID] = now
+		if status != nil {
+			copy := *status
+			connection.status = &copy
+			connection.observedAt = now
+		}
 	}
 	h.mu.Unlock()
 	if ok && current == connection {
@@ -128,6 +148,43 @@ func (h *Hub) Heartbeat(connection *Connection, now time.Time) bool {
 		return true
 	}
 	return false
+}
+
+type ConnectionView struct {
+	RemoteIPAddress *string   `json:"remoteIpAddress"`
+	Capabilities    []string  `json:"-"`
+	ID              string    `json:"id"`
+	ConnectedAt     time.Time `json:"connectedAt"`
+	DurationMs      int64     `json:"durationMs"`
+}
+
+type StatusView struct {
+	SystemUptimeMs *int64    `json:"systemUptimeMs"`
+	ObservedAt     time.Time `json:"observedAt"`
+	AgeMs          int64     `json:"ageMs"`
+	Fresh          bool      `json:"fresh"`
+	ValidForMs     int64     `json:"validForMs"`
+}
+
+// Snapshot reads online state, connection identity and telemetry under one lock.
+// Keep monotonic timestamps in memory; only convert wall times when serializing.
+func (h *Hub) Snapshot(deviceID string, now time.Time) (*ConnectionView, *StatusView) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	c := h.connections[deviceID]
+	if c == nil {
+		return nil, nil
+	}
+	connection := &ConnectionView{ID: c.id, RemoteIPAddress: c.remoteIPAddress, ConnectedAt: c.connectedAt.UTC(), DurationMs: max(0, now.Sub(c.connectedAt).Milliseconds()), Capabilities: append([]string(nil), c.capabilities...)}
+	if c.status == nil {
+		return connection, nil
+	}
+	age := max(0, now.Sub(c.observedAt).Milliseconds())
+	return connection, &StatusView{
+		SystemUptimeMs: c.status.SystemUptimeMs,
+		ObservedAt:     c.observedAt.UTC(), AgeMs: age, Fresh: now.Sub(c.observedAt) < h.offlineAfter,
+		ValidForMs: max(0, h.offlineAfter.Milliseconds()-age),
+	}
 }
 
 func (h *Hub) Acknowledge(connection *Connection, commandID string) bool {

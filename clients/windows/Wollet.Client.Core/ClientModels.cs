@@ -15,7 +15,13 @@ public sealed record DeviceSnapshot(
     DateTimeOffset CreatedAt,
     CompatibilityResult? Compatibility = null,
     string? ServerVersion = null,
-    string[]? ServerCapabilities = null);
+    string[]? ServerCapabilities = null,
+    DeviceConnectionSnapshot? Connection = null,
+    ClientStatusSnapshot? ClientStatus = null);
+
+public sealed record DeviceConnectionSnapshot(string Id, DateTimeOffset ConnectedAt, long DurationMs, string? RemoteIpAddress);
+public sealed record ClientStatusSnapshot(long? SystemUptimeMs,
+    DateTimeOffset ObservedAt, long AgeMs, bool Fresh, long ValidForMs);
 
 public sealed class WolletApiException : Exception
 {

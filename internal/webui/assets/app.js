@@ -13,6 +13,11 @@ const state = {
   tokenDeviceIds: null,
   toastTimer: null,
   relativeTimeTimer: null,
+  timingSynced: false,
+  deviceRevision: 0,
+  refreshGeneration: 0,
+  lastTimingTick: performance.now(),
+  lastTimingWall: Date.now(),
 };
 
 const elements = {};
@@ -36,6 +41,12 @@ document.addEventListener("DOMContentLoaded", () => {
     deviceName: document.querySelector("#device-name"),
     deviceStatus: document.querySelector("#device-status"),
     deviceMeta: document.querySelector("#device-meta"),
+    deviceMac: document.querySelector("#device-mac"),
+    deviceIpSeparator: document.querySelector("#device-ip-separator"),
+    deviceNetwork: document.querySelector("#device-network"),
+    deviceIp: document.querySelector("#device-ip"),
+    connectionDuration: document.querySelector("#device-connection-duration"),
+    systemUptime: document.querySelector("#device-system-uptime"),
     deviceActivity: document.querySelector("#device-activity"),
     deviceAction: document.querySelector("#device-action"),
     deviceActionLabel: document.querySelector("#device-action-label"),
@@ -86,7 +97,21 @@ function bindInteractions() {
     if (state.planDialog?.active) { event.preventDefault(); void sendPlanAction("cancel"); }
   });
   elements.confirmSubmit.addEventListener("click", runConfirmedAction);
-  state.relativeTimeTimer = window.setInterval(refreshSelectedDeviceMeta, 30_000);
+  state.relativeTimeTimer = window.setInterval(refreshSelectedDeviceMeta, 1000);
+  window.addEventListener("offline", closeEvents);
+  window.addEventListener("online", () => {
+    if (!document.hidden && !elements.appView.hidden) {
+      openEvents();
+      void refreshDeviceSnapshot();
+    }
+  });
+  document.addEventListener("visibilitychange", () => {
+    pauseDeviceTiming();
+    if (!document.hidden && !elements.appView.hidden) {
+      openEvents();
+      void refreshDeviceSnapshot();
+    }
+  });
 }
 
 async function bootstrap() {
@@ -178,31 +203,42 @@ async function logout() {
 
 function openEvents() {
   closeEvents();
+  state.lastTimingTick = performance.now();
+  state.lastTimingWall = Date.now();
   const source = new EventSource("/api/v1/events");
   source.addEventListener("snapshot", event => {
+    if (source !== state.events) return;
+    state.timingSynced = true;
     const payload = JSON.parse(event.data);
     applySnapshot(payload.devices || []);
   });
   source.addEventListener("device.updated", event => {
+    if (source !== state.events) return;
     applyDeviceUpdate(JSON.parse(event.data));
   });
   source.addEventListener("device.wake_timeout", event => {
+    if (source !== state.events) return;
     const device = JSON.parse(event.data);
     applyDeviceUpdate(device);
     showToast(`仍未检测到“${device.name}”上线，可以再次尝试唤醒`);
   });
   source.addEventListener("device.shutdown_timeout", event => {
+    if (source !== state.events) return;
     const device = JSON.parse(event.data);
     applyDeviceUpdate(device);
     showToast(`“${device.name}”仍然在线，可以再次尝试关机`);
   });
   source.addEventListener("device.removed", event => {
+    if (source !== state.events) return;
+    state.deviceRevision++;
     const payload = JSON.parse(event.data);
     state.devices = state.devices.filter(device => device.id !== payload.id);
     ensureSelection();
     render();
   });
   source.onerror = () => {
+    if (source !== state.events) return;
+    pauseDeviceTiming();
     if (source.readyState === EventSource.CLOSED) {
       showToast("状态连接已断开，请刷新页面重试");
     }
@@ -211,6 +247,8 @@ function openEvents() {
 }
 
 function closeEvents() {
+  pauseDeviceTiming();
+  state.refreshGeneration++;
   if (state.events) {
     state.events.close();
     state.events = null;
@@ -218,7 +256,8 @@ function closeEvents() {
 }
 
 function applySnapshot(devices) {
-  devices.forEach(observePlan);
+  state.deviceRevision++;
+  devices.forEach(observeDevice);
   const pairedDevice = findNewlyPairedDevice(devices);
   state.devices = devices;
   sortDevices();
@@ -228,7 +267,8 @@ function applySnapshot(devices) {
 }
 
 function applyDeviceUpdate(device) {
-  observePlan(device);
+  state.deviceRevision++;
+  observeDevice(device);
   const index = state.devices.findIndex(item => item.id === device.id);
   const isNew = index === -1;
   if (isNew) {
@@ -328,7 +368,7 @@ function devicePresentation(device) {
 }
 
 function renderDeviceMeta(device) {
-  let activity = "连接正常";
+  let activity = "";
   if (device.operation === "waking") {
     activity = "等待上线";
   } else if (device.operation === "shutting_down") {
@@ -337,13 +377,88 @@ function renderDeviceMeta(device) {
     const lastSeen = formatLastSeen(device.lastSeenAt);
     activity = lastSeen === "从未上线" ? lastSeen : `最后在线 ${lastSeen}`;
   }
-  elements.deviceMeta.textContent = device.macAddress;
+  elements.deviceMac.textContent = device.macAddress;
   elements.deviceActivity.textContent = activity;
+  elements.deviceActivity.hidden = !activity;
+  renderDeviceNetwork(device);
 }
 
 function refreshSelectedDeviceMeta() {
+  const tick = performance.now();
+  const wall = Date.now();
+  if (!document.hidden && !elements.appView.hidden && state.events &&
+      (tick - state.lastTimingTick > 5000 || Math.abs((wall - state.lastTimingWall) - (tick - state.lastTimingTick)) > 2000)) {
+    pauseDeviceTiming();
+    openEvents();
+    void refreshDeviceSnapshot();
+  }
+  state.lastTimingTick = tick;
+  state.lastTimingWall = wall;
   const device = selectedDevice();
   if (device && !elements.deviceFocus.hidden) renderDeviceMeta(device);
+}
+
+function observeDevice(device) {
+  observePlan(device);
+  device.receivedAt = performance.now();
+  device.frozenElapsedMs = 0;
+}
+
+function pauseDeviceTiming() {
+  if (state.timingSynced) {
+    for (const device of state.devices) device.frozenElapsedMs = Math.max(0, performance.now() - device.receivedAt);
+  }
+  state.timingSynced = false;
+  const device = selectedDevice();
+  if (device && elements.deviceNetwork) renderDeviceNetwork(device);
+}
+
+async function refreshDeviceSnapshot() {
+  const revision = state.deviceRevision;
+  const generation = ++state.refreshGeneration;
+  try {
+    const response = await api("/api/v1/devices");
+    if (generation !== state.refreshGeneration || revision !== state.deviceRevision || elements.appView.hidden) return;
+    state.timingSynced = state.events?.readyState === EventSource.OPEN && !document.hidden;
+    applySnapshot(response.devices || []);
+  } catch (error) {
+    if (generation !== state.refreshGeneration) return;
+    if (error.status === 401) showLogin();
+  }
+}
+
+function deviceElapsed(device) {
+  return state.timingSynced && !document.hidden
+    ? Math.max(0, performance.now() - device.receivedAt) : (device.frozenElapsedMs || 0);
+}
+
+function formatDuration(milliseconds) {
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return "未知";
+  const seconds = Math.floor(milliseconds / 1000);
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor(seconds / 3600) % 24;
+  const minutes = Math.floor(seconds / 60) % 60;
+  if (seconds < 60) return `${seconds} 秒`;
+  return [days ? `${days} 天` : "", hours ? `${hours} 小时` : "", minutes ? `${minutes} 分` : ""].filter(Boolean).join(" ");
+}
+
+function renderDeviceNetwork(device) {
+  const connection = device.connection;
+  elements.deviceNetwork.hidden = device.status !== "online" || !connection;
+  elements.deviceIp.hidden = elements.deviceNetwork.hidden;
+  elements.deviceIpSeparator.hidden = elements.deviceNetwork.hidden;
+  if (elements.deviceNetwork.hidden) return;
+  const elapsed = deviceElapsed(device);
+  const synced = state.timingSynced && !document.hidden;
+  elements.connectionDuration.textContent = `当前在线 ${formatDuration(connection.durationMs + elapsed)}${synced ? "" : "（待同步）"}`;
+  const sample = device.clientStatus;
+  const fresh = sample?.fresh === true && elapsed < sample.validForMs;
+  elements.deviceIp.textContent = `${connection.remoteIpAddress || "IP 未知"}${connection.remoteIpAddress && !synced ? "（待同步）" : ""}`;
+  const hasUptime = Number.isSafeInteger(sample?.systemUptimeMs) && sample.systemUptimeMs >= 0;
+  const uptime = hasUptime ? formatDuration(sample.systemUptimeMs +
+    (sample.fresh ? sample.ageMs + Math.min(elapsed, sample.validForMs) : 0)) : "未知";
+  elements.systemUptime.textContent = `系统运行 ${uptime}${hasUptime && (!fresh || !synced) ? "（待更新）" : ""}`;
+  elements.systemUptime.title = sample?.observedAt ? `采样时间 ${new Date(sample.observedAt).toLocaleString()}` : "客户端尚未提供有效样本";
 }
 
 function makeDeviceTab(device) {
@@ -824,11 +939,14 @@ function renderCompatibility(device) {
   const badge = document.querySelector("#compatibility-badge");
   const panel = document.querySelector("#compatibility-details");
   document.querySelector("#client-version").textContent = device ? `客户端 ${result?.clientVersion || "版本未知"}${result?.historical ? " · 上次连接" : ""}` : "";
-  badge.textContent = result?.label || "";
-  badge.hidden = !result?.label;
+  const warning = ["limited", "client_upgrade", "server_upgrade", "both_upgrade"].includes(result?.kind);
+  badge.textContent = warning ? `详情 · ${result.label}` : "详情";
+  badge.dataset.warning = String(warning);
+  badge.setAttribute("aria-label", `版本与功能详情${result?.label ? `，${result.label}` : ""}`);
+  badge.hidden = !device;
   panel.replaceChildren();
-  if (!result) return;
   function paragraph(text) { const p = document.createElement("p"); p.textContent = text; panel.append(p); }
+  if (!result) { paragraph("暂未获得版本与功能兼容信息"); return; }
   paragraph(`客户端 ${result.clientVersion} · 服务端 ${result.serverVersion}`);
   paragraph(result.detail);
   const missing = result.missing || [];

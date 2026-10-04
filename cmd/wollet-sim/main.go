@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -121,6 +122,8 @@ func runSimulator(args []string) error {
 	configPath := flags.String("config", "wollet-sim.json", "simulator config file")
 	exitOnShutdown := flags.Bool("exit-on-shutdown", true, "exit after acknowledging shutdown")
 	planMode := flags.Bool("shutdown-plans", true, "enable client-managed countdown (false tests legacy protocol)")
+	statusMode := flags.Bool("device-status", true, "report simulated system uptime")
+	systemUptime := flags.Duration("system-uptime", 0, "initial simulated system uptime (not the host OS uptime)")
 	localCancelAfter := flags.Duration("local-cancel-after", 0, "simulate local cancellation after this duration")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -138,6 +141,10 @@ func runSimulator(args []string) error {
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	if *systemUptime < 0 {
+		return errors.New("system-uptime must be nonnegative")
+	}
+	uptimeOrigin := time.Now().Add(-*systemUptime)
 	defer stop()
 	delay := time.Second
 	var plans *simulatedPlans
@@ -150,7 +157,7 @@ func runSimulator(args []string) error {
 				return nil
 			}
 		}
-		err := connect(ctx, config, *exitOnShutdown, plans)
+		err := connect(ctx, config, *exitOnShutdown, plans, *statusMode, uptimeOrigin)
 		if errors.Is(err, errShutdownReceived) || errors.Is(err, context.Canceled) {
 			return nil
 		}
@@ -169,7 +176,7 @@ func runSimulator(args []string) error {
 	}
 }
 
-func connect(ctx context.Context, config simulatorConfig, exitOnShutdown bool, plans *simulatedPlans) error {
+func connect(ctx context.Context, config simulatorConfig, exitOnShutdown bool, plans *simulatedPlans, statusMode bool, uptimeOrigin time.Time) error {
 	endpoint, err := url.Parse(config.Server)
 	if err != nil {
 		return err
@@ -186,7 +193,9 @@ func connect(ctx context.Context, config simulatorConfig, exitOnShutdown bool, p
 	headers := http.Header{}
 	headers.Set("X-Wollet-Device-ID", config.DeviceID)
 	headers.Set("Authorization", "Bearer "+config.DeviceSecret)
-	conn, response, err := websocket.Dial(ctx, endpoint.String(), &websocket.DialOptions{HTTPHeader: headers})
+	transport := &http.Transport{Proxy: nil}
+	defer transport.CloseIdleConnections()
+	conn, response, err := websocket.Dial(ctx, endpoint.String(), &websocket.DialOptions{HTTPHeader: headers, HTTPClient: &http.Client{Transport: transport}})
 	if err != nil {
 		if response != nil {
 			defer response.Body.Close()
@@ -214,6 +223,9 @@ func connect(ctx context.Context, config simulatorConfig, exitOnShutdown bool, p
 	if plans != nil {
 		capabilities = []string{protocol.ShutdownPlanCapability}
 	}
+	if statusMode {
+		capabilities = append(capabilities, protocol.DeviceStatusCapability)
+	}
 	if err := write(protocol.ClientMessage{
 		Type: "hello", ProtocolVersion: protocol.Version,
 		Capabilities: capabilities,
@@ -228,6 +240,15 @@ func connect(ctx context.Context, config simulatorConfig, exitOnShutdown bool, p
 	if ready.Type != "ready" || ready.ProtocolVersion != protocol.Version {
 		return errors.New("server returned an unsupported ready message")
 	}
+	statusMode = statusMode && slices.Contains(ready.Capabilities, protocol.DeviceStatusCapability)
+	writeHeartbeat := func() error {
+		message := protocol.ClientMessage{Type: "heartbeat"}
+		if statusMode {
+			uptime := max(0, time.Since(uptimeOrigin).Milliseconds())
+			message.DeviceStatus = &protocol.DeviceStatus{SystemUptimeMs: &uptime}
+		}
+		return write(message)
+	}
 	if plans != nil && ready.SessionID != "" {
 		for _, result := range plans.history() {
 			if err := write(protocol.ClientMessage{Type: "shutdown_plan_sync", SessionID: ready.SessionID, Result: result}); err != nil {
@@ -239,6 +260,11 @@ func connect(ctx context.Context, config simulatorConfig, exitOnShutdown bool, p
 		}
 	}
 	heartbeatEvery := time.Duration(ready.HeartbeatIntervalSeconds) * time.Second
+	if statusMode && (plans == nil || ready.SessionID == "") {
+		if err := writeHeartbeat(); err != nil {
+			return err
+		}
+	}
 	if heartbeatEvery <= 0 {
 		heartbeatEvery = 15 * time.Second
 	}
@@ -277,7 +303,7 @@ func connect(ctx context.Context, config simulatorConfig, exitOnShutdown bool, p
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := write(protocol.ClientMessage{Type: "heartbeat"}); err != nil {
+				if err := writeHeartbeat(); err != nil {
 					return
 				}
 			}
@@ -292,6 +318,11 @@ func connect(ctx context.Context, config simulatorConfig, exitOnShutdown bool, p
 		if plans != nil && ready.SessionID != "" {
 			if message.SessionID != ready.SessionID {
 				return errors.New("invalid plan session")
+			}
+			if message.Type == "shutdown_plan_synced" && statusMode {
+				if err := writeHeartbeat(); err != nil {
+					return err
+				}
 			}
 			if message.Type == "shutdown_plan_synced" || message.Type == "shutdown_plan_recorded" {
 				continue
