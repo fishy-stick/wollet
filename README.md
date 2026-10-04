@@ -145,7 +145,7 @@ Compose 默认使用 `ghcr.io/fishy-stick/wollet:latest`，数据库保存在 `.
 
 Windows 客户端的绑定、状态检查和后台连接均直连服务端，不使用系统代理或代理环境变量。
 
-### 同步关机倒计时（v1.1.0 开发版）
+### 同步关机倒计时
 
 服务端和客户端均支持新版能力时，网页点击关机便在客户端开始十秒倒计时。目标电脑显示居中的环形倒计时弹窗，两端均可取消或立即执行，无需客户端再次确认。普通用户提示组件随登录启动；直接以管理员身份安装时，请在安装完成后关闭管理窗口以启动当前会话提示。
 
@@ -155,7 +155,7 @@ Windows 客户端的绑定、状态检查和后台连接均直连服务端，不
 
 模拟器默认启用新版协议，`--shutdown-plans=false` 测试旧流程，`--local-cancel-after=3s` 模拟本地取消，`--exit-on-shutdown=false` 保留进程便于检查终态。模拟器不会关闭真实电脑。
 
-### 连接 IP 与运行时长（v1.2.0 开发版）
+### 连接 IP 与运行时长
 
 管理页面新增连接 IP、当前在线时长及系统运行时长。IP 由服务端读取客户端 WebSocket 连接的实际对端地址，局域网直连时就是设备连接所用的 IP；经过 NAT 或反向代理时显示服务端看到的对端地址，不自动采用转发请求头。当前在线从客户端 WebSocket 连接成功开始，页面刷新不重置，断线重连后重新计时。系统运行使用 Windows 内核运行计时，包含睡眠和休眠；快速启动可能保留原时长，完整重启后归零。
 
@@ -219,7 +219,7 @@ go build -o wollet-sim ./cmd/wollet-sim
 docker build --build-arg VERSION=1.2.0-dev.1 -t wollet:local .
 ```
 
-`1.2.0-dev.1` 是首个计划发布的测试版本；后续公开测试版再递增 `dev.N`。镜像标签 `local` 不会自动成为程序版本。未传入 `VERSION` 时，服务端报告 `unknown`，页面和客户端会显示“版本未知”，刷新无法补出版本号。重建后需重新创建服务端容器才会生效。直接使用 `go build` 时可通过 `-ldflags="-X github.com/fishy-stick/wollet/internal/compatibility.Version=1.2.0-dev.1"` 注入版本。
+示例版本号仅用于说明构建参数，请按实际构建替换。镜像标签 `local` 不会自动成为程序版本。未传入 `VERSION` 时，服务端报告 `unknown`，页面和客户端会显示“版本未知”，刷新无法补出版本号。重建后需重新创建服务端容器才会生效。直接使用 `go build` 时可通过 `-ldflags="-X github.com/fishy-stick/wollet/internal/compatibility.Version=1.2.0-dev.1"` 注入版本。
 
 ### 模拟客户端
 
@@ -266,16 +266,17 @@ dotnet publish clients/windows/Wollet.Client/Wollet.Client.csproj -p:PublishProf
 
 ### 发布与部署测试版
 
-提交需要测试的代码后，在该提交上创建并推送递增的测试 tag，例如：
+在需要发布的提交上手动创建并推送 tag，推送才会触发 `Release` 工作流；文档和普通分支推送不会创建 tag。以下占位符需替换为尚未使用的版本号，测试版使用 `dev.N` 或 `rc.N` 预发布标识：
 
-```sh
-git tag v1.2.0-dev.1
-git push origin v1.2.0-dev.1
+```powershell
+$releaseTag = "v<version>"
+git tag $releaseTag
+git push origin $releaseTag
 ```
 
-`Release` 工作流先校验 tag 的语义版本，再构建 Linux amd64／arm64 镜像和两种 Windows 客户端。带预发布标识的 tag（如 `dev.N`、`rc.N`）创建 GitHub Pre-release，不标为 Latest；首个测试版使用 `v1.2.0-dev.1` 和 `1.2.0-dev.1`，不更新 `latest`、`1` 或 `1.2`。正式 tag（如 `v1.2.0`）沿用正式发布流程。
+`Release` 工作流先校验 tag 的语义版本，再构建 Linux amd64／arm64 镜像和两种 Windows 客户端。带预发布标识的 tag（如 `v1.2.0-dev.N`、`v1.2.0-rc.N`）创建 GitHub Pre-release，不标为 Latest，也不更新 `latest` 或主／次版本镜像别名。正式 tag（如 `v1.2.0`）创建正式 Release，并更新对应镜像别名。
 
-等待 `Publish Docker image` 成功后，在服务端部署目录的 `.env` 中指定测试镜像：
+等待 `Publish Docker image` 成功后，在服务端部署目录的 `.env` 中指定实际发布的测试镜像；以下 tag 仅为示例：
 
 ```dotenv
 WOLLET_IMAGE=ghcr.io/fishy-stick/wollet:v1.2.0-dev.1
@@ -289,7 +290,7 @@ docker compose up -d wollet
 docker compose logs -f wollet
 ```
 
-Windows 客户端可在对应的 GitHub Pre-release 附件中下载。下一轮测试使用新的 `dev.N` tag，并同步更新部署镜像版本；发布前还需核对功能目录中的版本映射。
+Windows 客户端可在对应的 GitHub Pre-release 附件中下载。已发布版本、附件和发布时间以 [GitHub Releases](https://github.com/fishy-stick/wollet/releases) 为准。发布前需核对功能目录中的正式版本映射，已发布 tag 不重复使用。
 
 ### 测试
 

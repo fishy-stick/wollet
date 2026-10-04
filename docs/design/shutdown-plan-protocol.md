@@ -1,8 +1,8 @@
 # v1.1.0 同步关机协议设计
 
-状态：扩展已实现，Windows 倒计时已由用户完成人工验收；其他联合验收项见开发计划。更新日期：2026-09-28。
+扩展已实现，Windows 倒计时已由用户完成人工验收（2026-09-28）。
 
-本文定义客户端主导执行的关机计划，供服务端、管理页面和 Windows 客户端共同实现。现行协议见 [protocol.md](../protocol.md)，版本范围见 [开发计划](../development-plan.md)，弹窗设计及实施步骤见 [同步关机开发规划](shutdown-countdown-implementation.md)。
+本文定义客户端主导执行的关机计划，供服务端、管理页面和 Windows 客户端共同实现。现行协议见 [protocol.md](../protocol.md)，版本功能范围见 [开发规划](../development-plan.md)，弹窗设计及实施步骤见 [同步关机开发规划](shutdown-countdown-implementation.md)。
 
 ## 1. 目标与范围
 
