@@ -1,22 +1,19 @@
-# v1.1.0 同步关机协议设计
+# 同步关机协议
 
-状态：扩展已实现，Windows 倒计时已由用户完成人工验收；其他联合验收项见开发计划。更新日期：2026-09-28。
-
-本文定义客户端主导执行的关机计划，供服务端、管理页面和 Windows 客户端共同实现。现行协议见 [protocol.md](../protocol.md)，版本范围见 [开发计划](../development-plan.md)，弹窗设计及实施步骤见 [同步关机开发规划](shutdown-countdown-implementation.md)。
+本文描述 v1.2.0 中 `shutdown-plan.v1` 的消息、状态模型与恢复规则。基础认证、设备状态和其他接口见 [服务端协议](../protocol.md)，客户端界面与 IPC 架构见 [WPF 迁移记录](wpf-migration.md)。
 
 ## 1. 目标与范围
 
-已确定的交互原则：
+交互原则：
 
 - 管理页面发起关机后，客户端自动开始倒计时并显示提示，无需本地用户点击确认。
 - 客户端后台服务负责计时和到期执行，浏览器关闭不影响已接受的计划。
 - 本地用户可以取消或立即关机。操作在客户端后台服务内裁决，不依赖服务端在线。
 - 协议回执由程序自动发送，用于确认指令是否生效，不增加人工确认步骤。
-- 将来若支持调整时间，客户端应自动应用修改，无需人工确认。
 - 锁屏或无人登录时照常执行；有可交互桌面时自动显示提示并提供本地取消入口。
 - 客户端后台服务重启或升级时取消尚未执行的计划，不在恢复后补关机。
 
-`v1.1.0` 实现固定 10 秒倒计时、管理页面及本地弹窗的取消与立即执行、状态同步及旧版兼容。动态调整时长、自定义长时预约和休眠不属于本版本交付范围。
+`shutdown-plan.v1` 支持固定 10 秒倒计时、管理页面及本地弹窗的取消与立即执行、状态同步和兼容关机流程。不支持动态调整时长、自定义长时预约或休眠。
 
 ## 2. 职责与状态归属
 
@@ -33,9 +30,9 @@ WebSocket 会话与计划生命周期分离。普通断线不会取消已经接�
 
 ## 3. 兼容与能力协商
 
-保持 `protocolVersion: 1`，在 `hello` 和 `ready` 增加可选 `capabilities`。旧协议的 `shutdown` / `shutdown_ack` 仍表示立即关机，不改变语义。
+`protocolVersion` 为 1，`hello` 和 `ready` 使用可选 `capabilities` 协商能力。兼容协议的 `shutdown` / `shutdown_ack` 仍表示立即关机，不改变语义。
 
-新版客户端发送：
+以下示例仅展示关机计划协商；完整版本及状态能力字段见 [服务端协议](../protocol.md#实时连接)。客户端发送：
 
 ```json
 {
@@ -47,7 +44,7 @@ WebSocket 会话与计划生命周期分离。普通断线不会取消已经接�
 }
 ```
 
-新版服务端返回双方支持的能力交集；协商成功时额外返回每次连接新生成的 `sessionId`：
+服务端在 `ready.capabilities` 中返回本次连接启用的可选能力；关机计划协商成功时返回每次连接新生成的 `sessionId`：
 
 ```json
 {
@@ -56,18 +53,16 @@ WebSocket 会话与计划生命周期分离。普通断线不会取消已经接�
   "heartbeatIntervalSeconds": 15,
   "offlineAfterSeconds": 45,
   "capabilities": ["shutdown-plan.v1"],
-  "sessionId": "connection-uuid"
+  "sessionId": "8c56d93f-9d6e-4917-a823-b647b3510dce"
 }
 ```
 
 - 字段缺失等价于不支持扩展。未知能力名称忽略；未协商的消息类型仍按现有规则拒绝。
 - 仅双方协商成功才发送下文的新消息。新客户端连接旧服务端时，继续使用原有心跳和立即关机流程。
-- 服务端设备视图增加 `capabilities`，供新版页面选择流程；离线时不据历史能力宣称当前可操作。
+- 服务端设备视图包含本次连接的 `capabilities`，供页面选择流程；离线时不据历史能力宣称当前可操作。
 - 新客户端完成状态同步后，新服务端才开放该设备的计划操作。
 - 旧客户端继续使用网页本地 10 秒倒计时及原关机 API，不显示客户端同步提示。
 - 对已协商扩展的连接，禁止绕过计划流程发送旧 `shutdown`。旧页面调用旧关机 API 时返回 `409 shutdown_plan_required`，提示刷新页面。
-
-旧服务端目前通过结构体读取握手字段，需用兼容测试确认增加可选字段不会导致旧版连接失败。
 
 ## 4. 计划与请求标识
 
@@ -87,7 +82,7 @@ WebSocket 会话与计划生命周期分离。普通断线不会取消已经接�
 
 客户端检查顺序为：当前会话和消息结构、已处理的指令 ID、计划状态与修订号。已处理指令直接返回原处理结果，不因计划已经进入终态而把成功重试改报为失败。`requestId` 按设备隔离，且与操作种类、计划 ID、请求内容共同校验。
 
-UUID 字段必须是合法 UUID，示例中的描述性字符串仅用于说明。`revision`、`expectedRevision` 和 `sequence` 使用正整数并限制在 JSON 安全整数范围内；`remainingMilliseconds` 非负，本版本不超过 10000。创建时仅接受 `delaySeconds: 10`，缺失或其他值均拒绝。字段类型错误、过大的消息和未经协商的新消息不能被当作默认关机请求。
+UUID 字段必须是合法 UUID；调用方为新计划及新操作生成新的 UUID，重试使用原值。`revision`、`expectedRevision` 和 `sequence` 使用正整数并限制在 JSON 安全整数范围内；`remainingMilliseconds` 非负且不超过 10000。创建时仅接受 `delaySeconds: 10`，缺失或其他值均拒绝。字段类型错误、过大的消息和未经协商的新消息不能被当作默认关机请求。
 
 ## 5. 状态模型
 
@@ -124,7 +119,7 @@ UUID 字段必须是合法 UUID，示例中的描述性字符串仅用于说明�
 
 ## 7. WebSocket 消息
 
-沿用已认证的连接、文本 JSON 和 4 KiB 单消息限制。所有新增消息仅在协商 `shutdown-plan.v1` 后使用。
+沿用已认证的连接、文本 JSON 和 4 KiB 单消息限制。本节消息仅在协商 `shutdown-plan.v1` 后使用。
 
 ### 7.1 创建计划
 
@@ -133,9 +128,9 @@ UUID 字段必须是合法 UUID，示例中的描述性字符串仅用于说明�
 ```json
 {
   "type": "shutdown_plan_create",
-  "sessionId": "connection-uuid",
-  "commandId": "command-uuid",
-  "operationId": "operation-uuid",
+  "sessionId": "8c56d93f-9d6e-4917-a823-b647b3510dce",
+  "commandId": "669dbb76-8ad0-414a-9dad-5907b1dff010",
+  "operationId": "a7e2c9f1-4d6b-4fb2-97a4-5b8649e11c73",
   "delaySeconds": 10
 }
 ```
@@ -147,9 +142,9 @@ UUID 字段必须是合法 UUID，示例中的描述性字符串仅用于说明�
 ```json
 {
   "type": "shutdown_plan_cancel",
-  "sessionId": "connection-uuid",
-  "commandId": "cancel-command-uuid",
-  "operationId": "operation-uuid",
+  "sessionId": "8c56d93f-9d6e-4917-a823-b647b3510dce",
+  "commandId": "7dd5b6b3-0af8-4ab9-a21c-584ae86c6aa7",
+  "operationId": "a7e2c9f1-4d6b-4fb2-97a4-5b8649e11c73",
   "expectedRevision": 1
 }
 ```
@@ -161,13 +156,13 @@ UUID 字段必须是合法 UUID，示例中的描述性字符串仅用于说明�
 ```json
 {
   "type": "shutdown_plan_result",
-  "sessionId": "connection-uuid",
-  "commandId": "command-uuid",
-  "operationId": "operation-uuid",
+  "sessionId": "8c56d93f-9d6e-4917-a823-b647b3510dce",
+  "commandId": "669dbb76-8ad0-414a-9dad-5907b1dff010",
+  "operationId": "a7e2c9f1-4d6b-4fb2-97a4-5b8649e11c73",
   "accepted": true,
   "sequence": 1,
   "plan": {
-    "operationId": "operation-uuid",
+    "operationId": "a7e2c9f1-4d6b-4fb2-97a4-5b8649e11c73",
     "revision": 1,
     "state": "scheduled",
     "remainingMilliseconds": 10000
@@ -179,7 +174,7 @@ UUID 字段必须是合法 UUID，示例中的描述性字符串仅用于说明�
 
 取消接受回执必须附 `cancelled`；立即执行接受回执表示已进入 `executing`，后续系统成功或失败通过状态上报给出。接受执行不等于系统关机成功。重复回执的结果内容保持原值；附带快照的旧修订不能覆盖最新视图。
 
-同一连接内重发缓存回执保留原 `sequence`，不能用新的序号包装旧的剩余时间。跨连接对账通过 `shutdown_plan_sync.result` 传递原结果，并另行生成当前计划快照。
+重复指令返回缓存的处理结果，旧修订快照不能覆盖最新状态。同一连接已同步的 `scheduled` 计划收到同修订快照时，服务端将剩余时间限制为不超过已有估算值，避免旧观察延长倒计时。跨连接对账通过 `shutdown_plan_sync.result` 传递原结果，并另行生成当前计划快照。
 
 普通业务拒绝不关闭连接。伪造会话、非法消息结构等协议错误沿用 policy violation 处理。首次创建被拒绝时 `plan` 可为 `null`，服务端记录拒绝结果，不虚构客户端计划。
 
@@ -190,10 +185,10 @@ UUID 字段必须是合法 UUID，示例中的描述性字符串仅用于说明�
 ```json
 {
   "type": "shutdown_plan_state",
-  "sessionId": "connection-uuid",
+  "sessionId": "8c56d93f-9d6e-4917-a823-b647b3510dce",
   "sequence": 2,
   "plan": {
-    "operationId": "operation-uuid",
+    "operationId": "a7e2c9f1-4d6b-4fb2-97a4-5b8649e11c73",
     "revision": 2,
     "state": "cancelled",
     "remainingMilliseconds": 0,
@@ -204,7 +199,7 @@ UUID 字段必须是合法 UUID，示例中的描述性字符串仅用于说明�
 
 周期性快照不增加 `revision`。客户端串行生成并发送快照，每次新快照增加 `sequence`；同修订号仅接受更高序号的时间观察，不改变状态。`sequence` 在新会话重新从 1 开始，`revision` 随计划持久化。`reason` 包括 `local_user`、`remote_user`、`client_restarted`、`system_resumed`、`storage_error`、`system_error`、`execution_interrupted`；错误细节用于日志，避免暴露凭据。
 
-快照可附 `presentation: visible | unavailable` 表示提示是否可见，该字段只是观察信息，不决定是否执行。锁屏期间接受的计划，在解锁且仍未到期时显示实际剩余时间，不重新开始十秒。
+协议不提供桌面提示可见性字段；提示是否可见不决定计划是否执行。锁屏期间接受的计划，在解锁且仍未到期时显示实际剩余时间，不重新开始十秒。
 
 本地取消首先在后台服务内完成并关闭提示，再尝试发送快照；不等待网络回执。
 
@@ -217,10 +212,10 @@ UUID 字段必须是合法 UUID，示例中的描述性字符串仅用于说明�
 ```json
 {
   "type": "shutdown_plan_sync",
-  "sessionId": "new-connection-uuid",
+  "sessionId": "cf1c9dca-3b61-4c2d-8a8a-4c8d7e792eb4",
   "sequence": 1,
   "plan": {
-    "operationId": "operation-uuid",
+    "operationId": "a7e2c9f1-4d6b-4fb2-97a4-5b8649e11c73",
     "revision": 1,
     "state": "scheduled",
     "remainingMilliseconds": 6000
@@ -230,14 +225,14 @@ UUID 字段必须是合法 UUID，示例中的描述性字符串仅用于说明�
 }
 ```
 
-`result` 非空时包含原 `commandId`、`operationId`、`accepted`、可选 `code` 和该指令处理时的修订号。没有活动计划时，第一条的 `plan` 为 `null`；有后续记录时 `complete: false`。最后一条使用 `complete: true`。同步期间计时和本地取消照常运行，新状态与同步快照通过同一有序发送队列传输。
+`result` 非空时包含原 `commandId`、`operationId`、`accepted`、可选 `code` 和 `plan`；`plan` 为该指令处理时的计划快照，可以为 null。没有活动计划时，第一条的 `plan` 为 `null`；有后续记录时 `complete: false`。最后一条使用 `complete: true`。同步期间计时和本地取消照常运行，新状态与同步快照通过同一有序发送队列传输。
 
 服务端持久化收到的计划或指令结果后，发送 `shutdown_plan_recorded`，携带当前 `sessionId`、对应的 `operationId`、`revision` 和可选 `commandId`。最后一批记录完成后发送：
 
 ```json
 {
   "type": "shutdown_plan_synced",
-  "sessionId": "new-connection-uuid"
+  "sessionId": "cf1c9dca-3b61-4c2d-8a8a-4c8d7e792eb4"
 }
 ```
 
@@ -249,13 +244,13 @@ UUID 字段必须是合法 UUID，示例中的描述性字符串仅用于说明�
 
 ## 8. 管理 API 与页面同步
 
-新增接口沿用管理员认证、同源校验及统一错误格式：
+计划接口使用管理员认证、同源校验及统一错误格式：
 
 | 接口 | 请求 | 行为 |
 | --- | --- | --- |
-| `POST /api/v1/devices/{id}/shutdown-plans` | `{ "operationId": "uuid" }` | 固定创建 10 秒计划 |
+| `POST /api/v1/devices/{id}/shutdown-plans` | `{ "operationId": "a7e2c9f1-4d6b-4fb2-97a4-5b8649e11c73" }` | 固定创建 10 秒计划 |
 | `GET /api/v1/devices/{id}/shutdown-plans/{operationId}` | 无 | 获取请求进度和最新客户端快照 |
-| `POST /api/v1/devices/{id}/shutdown-plans/{operationId}/cancel` | `{ "requestId": "uuid", "expectedRevision": 1 }` | 请求客户端取消 |
+| `POST /api/v1/devices/{id}/shutdown-plans/{operationId}/cancel` | `{ "requestId": "580cde71-3ab9-43b3-9f2e-30b1cae1b6c7", "expectedRevision": 1 }` | 请求客户端取消 |
 | `POST /api/v1/devices/{id}/shutdown-plans/{operationId}/execute` | 同上 | 请求立即执行 |
 
 查询接口可携带 `?requestId=uuid` 获取指定取消或执行请求的结果；省略时获取创建请求结果及当前计划状态。所有查询校验设备与计划归属。请求已确认时的响应结构示例：
@@ -264,13 +259,13 @@ UUID 字段必须是合法 UUID，示例中的描述性字符串仅用于说明�
 {
   "serverTime": "2026-09-19T01:00:00Z",
   "request": {
-    "operationId": "operation-uuid",
-    "commandId": "command-uuid",
+    "operationId": "a7e2c9f1-4d6b-4fb2-97a4-5b8649e11c73",
+    "commandId": "669dbb76-8ad0-414a-9dad-5907b1dff010",
     "action": "create",
     "status": "confirmed"
   },
   "plan": {
-    "operationId": "operation-uuid",
+    "operationId": "a7e2c9f1-4d6b-4fb2-97a4-5b8649e11c73",
     "revision": 1,
     "state": "scheduled",
     "remainingMilliseconds": 8000,
@@ -292,13 +287,13 @@ UUID 字段必须是合法 UUID，示例中的描述性字符串仅用于说明�
 - 浏览器超时或关闭不撤销已发送请求。重试沿用原 ID，查询结果，不产生新的指令或倒计时。
 - 服务端不排队等待离线设备以后执行。发送结果存在歧义时按未知处理，不按“未发送”处理。
 
-设备对象增加 `shutdownPlan` 和 `shutdownRequest`，并通过现有 `snapshot` / `device.updated` SSE 分发。响应提供 `serverTime`；计划附服务端估算的 `estimatedExecuteAt` 和最后同步时间 `observedAt`。旧的 `operation` 弱暂态不承担计划存储，断线清理弱暂态不能删除关机计划。
+设备对象包含可选的 `shutdownPlan` 和 `shutdownRequest`，并通过现有 `snapshot` / `device.updated` SSE 分发。响应提供 `serverTime`；计划附服务端估算的 `estimatedExecuteAt` 和最后同步时间 `observedAt`。旧的 `operation` 弱暂态不承担计划存储，断线清理弱暂态不能删除关机计划。
 
-页面点击关机后立即请求创建计划，以客户端快照驱动显示，不再先自行倒计时十秒。刷新或新开页面从快照恢复显示。远端取消等待自动回执才显示成功，未知结果期间不得显示“安全取消”。
+页面点击关机后立即请求创建计划，以客户端快照驱动显示；倒计时由客户端执行。刷新或新开页面从快照恢复显示。远端取消等待自动回执才显示成功，未知结果期间不得显示“安全取消”。
 
 ## 9. 故障与生命周期策略
 
-### 已确定的行为
+### 连接与进程生命周期
 
 | 场景 | 行为 |
 | --- | --- |
@@ -306,15 +301,15 @@ UUID 字段必须是合法 UUID，示例中的描述性字符串仅用于说明�
 | WebSocket 断线、服务端重启 | 客户端继续计时，本地取消有效；重连同步最新状态 |
 | 客户端后台服务重启、升级或系统重启 | 取消尚未执行的计划，不在重启后补关机；记录 `client_restarted` |
 | 未登录、锁屏 | 照常接受并执行；出现可交互桌面且计划未到期时显示剩余时间 |
-| 桌面提示进程退出或暂时不可用 | 后台计划继续；当前尚不上报提示是否可见，不等同于后台服务重启 |
+| 桌面提示进程退出或暂时不可用 | 后台计划继续；提示进程生命周期独立于后台服务 |
 | 弹窗关闭操作 | 不提供关闭或隐藏按钮；原生关闭消息、Alt+F4 和 Escape 转为本地取消请求，按后台服务处理结果结束窗口 |
 
 ### 桌面与电源策略
 
-| 场景 | 当前行为 |
+| 场景 | 行为 |
 | --- | --- |
 | 系统睡眠后恢复 | 取消未执行计划，记录 `system_resumed`，避免恢复后突然关机 |
-| 多个交互会话 | 首版只向当前解锁的活动控制台会话展示并接受取消；其他会话策略后续扩展 |
+| 多个交互会话 | 只向解锁的活动控制台会话展示并接受本地操作；RDP 和非活动会话不展示提示、不接受本地操作 |
 
 删除设备或撤销凭据不等同于取消关机。管理端应提示已接受计划可能继续；客户端检测到凭据失效时取消活动计划。若客户端离线且未收到撤销信息，服务端无法保证阻止关机。
 
@@ -332,23 +327,13 @@ UUID 字段必须是合法 UUID，示例中的描述性字符串仅用于说明�
 
 客户端和服务端的终态幂等记录至少保留 24 小时。活动计划、未解决的执行结果及与其关联的请求不能因为达到保留期限而删除。客户端与页面均不能因回执超时生成新的操作 ID。服务端 REST 重试只查询原请求，不重新发指令；一条指令在 WebSocket 上最多主动发送一次。
 
-客户端收到相同指令时仍须去重，作为边界保障。终态记录过期后不承诺旧请求幂等，调用方必须停止自动重试；查询已过期且可识别的请求返回 `410 result_expired`，无记录且无法识别的返回 `404`，两者均不表示已取消或执行成功。
+客户端收到相同指令时仍须去重。服务端和客户端保留幂等记录，没有自动过期清理机制。查询不存在的请求返回 `404 request_not_found`；该响应不表示计划已取消或执行成功。
 
-本地提示进程通过受访问控制的 IPC 向后台服务请求取消或立即执行，不读取设备密钥，也不直接获得关机权限。后台服务验证真实调用身份、会话、计划 ID 和当前状态。IPC 传输单独设计，窗口采用开发规划中已确认的居中圆环倒计时布局。
+本地提示进程通过受访问控制的 IPC 向后台服务请求取消或立即执行，不读取设备密钥，也不直接获得关机权限。后台服务验证真实调用身份、会话、计划 ID 和当前状态。Windows IPC 使用受访问控制的命名管道；窗口采用 WPF 居中圆环倒计时布局。
 
-## 10. 动态调整时间的扩展方向
+## 10. 协议回归检查
 
-未来可协商独立能力 `shutdown-plan.reschedule.v1`，增加 `shutdown_plan_reschedule`，携带 `operationId`、`commandId`、`expectedRevision` 和新的 `delaySeconds`。
-
-建议将时长定义为“客户端接受修改后还剩多少秒”。修改由客户端串行应用并增加修订号，自动刷新倒计时并回执；进入执行阶段后拒绝修改。服务端或页面不能在回执前把原计划标记为已延长。断线时未送达的修改不影响原计划。
-
-该能力和 REST 修改接口不在 `v1.1.0` 中实现或公布为可用能力；本版本遇到此类消息仍拒绝处理。
-
-## 11. 实施与验收
-
-实施顺序：先落实本节之前的状态及生命周期规则，编写协议契约测试；随后实现客户端计划引擎与桌面 IPC、服务端请求协调与状态存储，最后接入管理页面及模拟客户端。
-
-必须覆盖：
+回归检查覆盖：
 
 - 新旧客户端与服务端组合，未协商时没有扩展消息，旧立即关机语义不变。
 - 接受计划即自动显示，无人工确认；完整 10 秒倒计时仅发生一次。
@@ -357,7 +342,7 @@ UUID 字段必须是合法 UUID，示例中的描述性字符串仅用于说明�
 - 本地取消、远端取消、立即执行与到期竞争，系统接口最多调用一次。
 - 自动回执丢失、HTTP 超时、服务端重启后不误报成功，不重新创建计划。
 - 系统校时不改变剩余时长；高网络延迟仅影响展示，不缩短客户端提示时间。
-- 客户端重启、系统睡眠恢复、锁屏、无桌面提示、存储失败按最终确定的策略处理。
+- 客户端重启、系统睡眠恢复、锁屏、无桌面提示、存储失败按本协议的生命周期策略处理。
 - 锁屏和无人登录时照常执行；在倒计时结束前解锁，显示剩余时间而不是新的十秒。
 - 桌面提示退出不取消计划；后台服务重启取消计划，二者不能混淆。
 - 终态、旧修订及旧会话消息不会重新激活计划。

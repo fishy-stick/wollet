@@ -138,7 +138,7 @@ func (s *Server) runHeartbeatSweeper(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			s.hub.Sweep(now.UTC())
+			s.hub.Sweep(now)
 		}
 	}
 }

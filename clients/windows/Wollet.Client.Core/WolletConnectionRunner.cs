@@ -19,12 +19,15 @@ public sealed class WolletConnectionRunner
     private readonly ShutdownPlanEngine? _plans;
     private long _sequence;
     private readonly ConnectionCompatibility? _compatibility;
+    private readonly ISystemUptimeProvider _systemUptime;
+    private bool _statusWarningLogged;
 
     public WolletConnectionRunner(
         IDeviceInfoProvider deviceInfoProvider,
         IShutdownController shutdownController,
         IClientLog? log = null,
-        TimeProvider? timeProvider = null, ShutdownPlanEngine? plans = null, ConnectionCompatibility? compatibility = null)
+        TimeProvider? timeProvider = null, ShutdownPlanEngine? plans = null, ConnectionCompatibility? compatibility = null,
+        ISystemUptimeProvider? systemUptimeProvider = null)
     {
         _deviceInfoProvider = deviceInfoProvider;
         _shutdownController = shutdownController;
@@ -32,6 +35,7 @@ public sealed class WolletConnectionRunner
         _timeProvider = timeProvider ?? TimeProvider.System;
         _plans = plans;
         _compatibility = compatibility;
+        _systemUptime = systemUptimeProvider ?? new WindowsSystemUptimeProvider();
     }
 
     public async Task RunAsync(ClientCredentials credentials, CancellationToken cancellationToken)
@@ -90,6 +94,8 @@ public sealed class WolletConnectionRunner
             throw new DeviceCredentialsRejectedException();
         }
 
+        var clientCapabilities = FeatureCatalog.Default.Profiles[FeatureCatalog.Default.CurrentProfile].Client
+            .Where(capability => _plans is not null || capability != "shutdown-plan.v1").ToArray();
         using var writeLock = new SemaphoreSlim(1, 1);
         await SendAsync(
             socket,
@@ -101,7 +107,7 @@ public sealed class WolletConnectionRunner
                 ProtocolVersion = ProtocolVersion.Current,
                 DeviceName = identity.Name,
                 MacAddress = identity.MacAddress,
-                Capabilities = _plans is null ? null : FeatureCatalog.Default.Profiles[FeatureCatalog.Default.CurrentProfile].Client,
+                Capabilities = clientCapabilities,
             },
             cancellationToken);
 
@@ -116,8 +122,9 @@ public sealed class WolletConnectionRunner
         }
 
         var supportsPlans = _plans is not null && ready.Capabilities?.Contains("shutdown-plan.v1") == true;
+        var supportsStatus = ready.Capabilities?.Contains("device-status.v1") == true;
         _compatibility?.Connected(ready.ServerVersion, ready.SupportedCapabilities ?? ["protocol.v1", .. ready.Capabilities ?? []],
-            _plans is null ? ["protocol.v1"] : FeatureCatalog.Default.Profiles[FeatureCatalog.Default.CurrentProfile].Client);
+            clientCapabilities);
         if (supportsPlans)
         {
             if (!Guid.TryParse(ready.SessionId, out _)) throw new ClientProtocolException("计划会话无效");
@@ -141,7 +148,8 @@ public sealed class WolletConnectionRunner
         _log.Information($"设备已连接，心跳间隔 {heartbeatInterval.TotalSeconds:0} 秒");
 
         using var sessionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var heartbeatTask = SendHeartbeatsAsync(socket, writeLock, heartbeatInterval, sessionCancellation.Token);
+        var heartbeatTask = SendHeartbeatsAsync(socket, writeLock, heartbeatInterval,
+            supportsStatus, sessionCancellation.Token);
         var commandTask = ReceiveCommandsAsync(socket, writeLock, supportsPlans ? ready.SessionId : null, sessionCancellation.Token);
         var stateTask = supportsPlans ? SendPlanStatesAsync(socket, writeLock, ready.SessionId!, sessionCancellation.Token)
             : Task.Delay(Timeout.Infinite, sessionCancellation.Token);
@@ -230,15 +238,36 @@ public sealed class WolletConnectionRunner
         ClientWebSocket socket,
         SemaphoreSlim writeLock,
         TimeSpan interval,
+        bool supportsStatus,
         CancellationToken cancellationToken)
     {
+        ClientMessage Heartbeat()
+        {
+            long? uptime = null;
+            if (supportsStatus)
+            {
+                try
+                {
+                    uptime = _systemUptime.ReadMilliseconds();
+                    if (uptime < 0 || uptime > 9_007_199_254_740_991L) uptime = null;
+                }
+                catch (Exception exception)
+                {
+                    if (!_statusWarningLogged) _log.Warning("无法采集系统运行时长，控制连接继续运行", exception);
+                    _statusWarningLogged = true;
+                }
+            }
+            return new ClientMessage { Type = "heartbeat",
+                DeviceStatus = supportsStatus ? new ClientDeviceStatus(uptime) : null };
+        }
+        if (supportsStatus) await SendAsync(socket, writeLock, Heartbeat(), cancellationToken);
         using var timer = new PeriodicTimer(interval, _timeProvider);
         while (await timer.WaitForNextTickAsync(cancellationToken))
         {
             await SendAsync(
                 socket,
                 writeLock,
-                new ClientMessage { Type = "heartbeat" },
+                Heartbeat(),
                 cancellationToken);
         }
     }

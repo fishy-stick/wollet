@@ -13,7 +13,7 @@ internal sealed record StartupInspectionResult(
     bool IsSuccess,
     CompatibilityResult? Compatibility = null);
 
-internal sealed class InstallCoordinator
+internal sealed class InstallCoordinator : IInstallCoordinator
 {
     public ClientUpdateVersion GetVersions() => _serviceInstaller.GetVersions();
     private readonly ICredentialStore _credentialStore;

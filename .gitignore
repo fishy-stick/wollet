@@ -6,4 +6,5 @@ data/
 coverage.out
 **/bin/
 **/obj/
+artifacts/
 *.user

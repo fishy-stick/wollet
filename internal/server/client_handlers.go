@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/netip"
+	"slices"
 	"strings"
 	"time"
 
@@ -137,9 +139,13 @@ func (s *Server) handleClientConnect(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var capabilities []string
+	supportsStatus := slices.Contains(hello.Capabilities, protocol.DeviceStatusCapability)
+	if supportsStatus {
+		capabilities = append(capabilities, protocol.DeviceStatusCapability)
+	}
 	var sessionID string
 	if planConn != nil {
-		capabilities = []string{protocol.ShutdownPlanCapability}
+		capabilities = append(capabilities, protocol.ShutdownPlanCapability)
 		sessionID = planConn.session
 		s.plans.mu.Lock()
 		s.plans.connections[device.ID] = planConn
@@ -168,8 +174,9 @@ func (s *Server) handleClientConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.forgetPeer(device.ID, conn)
-	connection := s.hub.Register(device.ID, conn, now)
-	defer s.hub.Unregister(connection, time.Now().UTC())
+	connection := s.hub.Register(device.ID, conn, time.Now(), connectionIPAddress(r), capabilities...)
+	defer func() { s.hub.Unregister(connection, time.Now()) }()
+	var lastInvalidStatusLog time.Time
 	for {
 		var message protocol.ClientMessage
 		if err := wsjson.Read(r.Context(), conn, &message); err != nil {
@@ -188,8 +195,17 @@ func (s *Server) handleClientConnect(w http.ResponseWriter, r *http.Request) {
 		}
 		switch message.Type {
 		case "heartbeat":
-			if !s.hub.Heartbeat(connection, time.Now().UTC()) {
+			now := time.Now()
+			status := message.DeviceStatus
+			if !supportsStatus {
+				status = nil
+			}
+			if !s.hub.HeartbeatStatus(connection, status, now) {
 				return
+			}
+			if status != nil && status.Invalid && (lastInvalidStatusLog.IsZero() || now.Sub(lastInvalidStatusLog) >= time.Minute) {
+				s.logger.Warn("invalid optional device status ignored", "device_id", device.ID)
+				lastInvalidStatusLog = now
 			}
 		case "shutdown_ack":
 			if message.CommandID == "" || !s.hub.Acknowledge(connection, message.CommandID) {
@@ -201,6 +217,17 @@ func (s *Server) handleClientConnect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// Display the peer of this exact WebSocket connection. Forwarded headers and
+// client-reported addresses do not change its origin; LAN clients connect directly.
+func connectionIPAddress(r *http.Request) *string {
+	address, err := netip.ParseAddr(remoteIP(r))
+	if err != nil || address.Unmap().IsUnspecified() || address.Unmap().IsMulticast() {
+		return nil
+	}
+	value := address.Unmap().String()
+	return &value
 }
 
 func (s *Server) authenticateClient(w http.ResponseWriter, r *http.Request) (store.Device, bool) {

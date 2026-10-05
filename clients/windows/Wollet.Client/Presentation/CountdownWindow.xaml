@@ -1,0 +1,35 @@
+<Window x:Class="Wollet.Client.CountdownWindow" x:ClassModifier="internal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Wollet.Client"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Style="{StaticResource {x:Type Window}}"
+        Title="Wollet · 即将关机" Width="440" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStyle="None" ShowActivated="False" ShowInTaskbar="False" Topmost="True"
+        WindowStartupLocation="CenterScreen" AutomationProperties.Name="Wollet 关机倒计时">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="0" GlassFrameThickness="0" CornerRadius="0" />
+    </shell:WindowChrome.WindowChrome>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Padding="28,24">
+        <StackPanel>
+            <TextBlock Text="Wollet" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" Margin="0,0,0,24" />
+            <TextBlock Text="即将关机" FontSize="28" FontWeight="SemiBold" TextAlignment="Center" />
+            <TextBlock Text="请保存正在进行的工作" Foreground="{DynamicResource MutedBrush}" TextAlignment="Center" Margin="0,8,0,26" />
+            <Grid Width="204" Height="204" Margin="0,0,0,22">
+                <local:ProgressRing x:Name="Ring" Stroke="{DynamicResource AccentBrush}" Track="{DynamicResource TrackBrush}" IsHitTestVisible="False" />
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock x:Name="Number" FontSize="58" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="NoWrap" AutomationProperties.LiveSetting="Off" />
+                    <TextBlock x:Name="Seconds" Text="秒" TextAlignment="Center" Foreground="{DynamicResource MutedBrush}" />
+                </StackPanel>
+            </Grid>
+            <TextBlock x:Name="Status" TextAlignment="Center" Foreground="{DynamicResource MutedBrush}" MinHeight="42" Margin="0,0,0,18" AutomationProperties.LiveSetting="Polite" />
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="12" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                <Button x:Name="CancelAction" Content="取消关机" Style="{StaticResource PrimaryButton}" IsDefault="True" Click="CancelClicked" AutomationProperties.Name="取消关机" />
+                <Button x:Name="ExecuteAction" Grid.Column="2" Content="立即关机" Style="{StaticResource DangerButton}" Click="ExecuteClicked" AutomationProperties.Name="立即关机" />
+            </Grid>
+        </StackPanel>
+    </Border>
+    </ScrollViewer>
+</Window>

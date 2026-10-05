@@ -24,6 +24,8 @@ internal sealed record ApiErrorBody(
 
 internal sealed record ClientMessage
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ClientDeviceStatus? DeviceStatus { get; init; }
     public string? ClientVersion { get; init; }
     [JsonPropertyName("type")]
     public required string Type { get; init; }
